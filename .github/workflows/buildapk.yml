@@ -1,0 +1,117 @@
+name: Build Android APK
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      target:
+        description: 'customer or rider (leave empty for both)'
+        required: false
+        default: ''
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [customer, rider]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+
+      - uses: actions/setup-java@v4
+        with: { distribution: temurin, java-version: 17 }
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build web (${{ matrix.target }})
+        working-directory: apps/web
+        env:
+          VITE_APP_TARGET:        ${{ matrix.target }}
+          VITE_SUPABASE_URL:      ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_API_URL:           ${{ secrets.VITE_API_URL }}
+          VITE_MAP_TILES_URL:     https://tiles.openfreemap.org/styles/liberty
+          VITE_DEFAULT_CITY:      Hyderabad
+          VITE_DEFAULT_LAT:       "17.3850"
+          VITE_DEFAULT_LNG:       "78.4867"
+        run: npm run build
+
+      # Add the Android platform on the fly (kept out of git per Capacitor convention).
+      - name: Initialize Capacitor Android project
+        working-directory: apps/web
+        env:
+          VITE_APP_TARGET: ${{ matrix.target }}
+        run: |
+          npx cap add android || true
+          npx cap sync android
+
+      # Rider APK needs background-location + foreground-service; customer does not.
+      - name: Inject AndroidManifest permissions
+        working-directory: apps/web/android/app/src/main
+        run: |
+          python3 - "$MATRIX_TARGET" <<'PY'
+          import re, sys, pathlib
+          target = sys.argv[1]
+          p = pathlib.Path("AndroidManifest.xml")
+          s = p.read_text()
+          perms = [
+              "android.permission.INTERNET",
+              "android.permission.ACCESS_NETWORK_STATE",
+              "android.permission.ACCESS_COARSE_LOCATION",
+              "android.permission.ACCESS_FINE_LOCATION",
+              "android.permission.FOREGROUND_SERVICE",
+              "android.permission.FOREGROUND_SERVICE_LOCATION",
+              "android.permission.POST_NOTIFICATIONS",
+              "android.permission.VIBRATE",
+              "android.permission.WAKE_LOCK",
+              "android.permission.CAMERA",
+              "android.permission.READ_MEDIA_IMAGES",
+          ]
+          if target == "rider":
+              perms.insert(4, "android.permission.ACCESS_BACKGROUND_LOCATION")
+          lines = "\n    ".join(f'<uses-permission android:name="{n}"/>' for n in perms)
+          s = re.sub(r"(<manifest[^>]*>)", r"\1\n    " + lines, s, count=1)
+          p.write_text(s)
+          PY
+        env:
+          MATRIX_TARGET: ${{ matrix.target }}
+
+      - name: Decode keystore
+        working-directory: apps/web/android
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > app/release.keystore
+
+      - name: Build signed APK
+        working-directory: apps/web/android
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_ALIAS:         ${{ secrets.KEY_ALIAS }}
+          KEY_PASSWORD:      ${{ secrets.KEY_PASSWORD }}
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleRelease \
+            -Pandroid.injected.signing.store.file=app/release.keystore \
+            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
+            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
+            -Pandroid.injected.signing.key.password=$KEY_PASSWORD
+
+      - name: Rename APK
+        working-directory: apps/web/android/app/build/outputs/apk/release
+        run: mv app-release.apk goride-${{ matrix.target }}.apk
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: goride-${{ matrix.target }}-apk
+          path: apps/web/android/app/build/outputs/apk/release/goride-${{ matrix.target }}.apk
+
+      - name: Attach to Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: apps/web/android/app/build/outputs/apk/release/goride-${{ matrix.target }}.apk

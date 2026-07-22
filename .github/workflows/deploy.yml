@@ -1,0 +1,79 @@
+name: Deploy web + api
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # -------------------- Cloudflare Pages (web) --------------------
+  web:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+
+      - name: Install
+        run: npm ci
+
+      - name: Build web
+        working-directory: apps/web
+        env:
+          VITE_SUPABASE_URL:      ${{ secrets.VITE_SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
+          VITE_API_URL:           ${{ secrets.VITE_API_URL }}
+          VITE_APP_TARGET:        customer
+          VITE_MAP_TILES_URL:     https://tiles.openfreemap.org/styles/liberty
+          VITE_DEFAULT_CITY:      Hyderabad
+          VITE_DEFAULT_LAT:       "17.3850"
+          VITE_DEFAULT_LNG:       "78.4867"
+        run: npm run build
+
+      - name: Deploy to Cloudflare Pages
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          command: pages deploy apps/web/dist --project-name=goride-web
+
+  # -------------------- Cloudflare Worker (api) --------------------
+  api:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+
+      - name: Install
+        run: npm ci
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          workingDirectory: apps/api
+          command: deploy
+          secrets: |
+            SUPABASE_URL
+            SUPABASE_ANON_KEY
+            SUPABASE_SERVICE_ROLE_KEY
+            SUPABASE_JWT_SECRET
+            SHARE_TOKEN_SECRET
+            ORS_KEY
+            GEOCODER_KEY
+        env:
+          SUPABASE_URL:              ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY:         ${{ secrets.SUPABASE_ANON_KEY }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+          SUPABASE_JWT_SECRET:       ${{ secrets.SUPABASE_JWT_SECRET }}
+          SHARE_TOKEN_SECRET:        ${{ secrets.SHARE_TOKEN_SECRET }}
+          ORS_KEY:                   ${{ secrets.ORS_KEY }}
+          GEOCODER_KEY:              ${{ secrets.GEOCODER_KEY }}
