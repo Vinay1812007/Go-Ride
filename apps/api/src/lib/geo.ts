@@ -154,6 +154,7 @@ export async function route(
       }>;
     };
     const r = data.routes[0];
+    if (!r) throw new Error('ORS returned no route');
     result = {
       distance_km: r.summary.distance / 1000,
       duration_min: r.summary.duration / 60,
@@ -168,6 +169,7 @@ export async function route(
       routes: Array<{ distance: number; duration: number; geometry: string }>;
     };
     const r = data.routes[0];
+    if (!r) throw new Error('OSRM returned no route');
     result = {
       distance_km: r.distance / 1000,
       duration_min: r.duration / 60,

@@ -32,21 +32,22 @@ export default function OrderPage() {
 
   useEffect(() => {
     if (!state) { nav('/', { replace: true }); return; }
+    const s = state; // narrow for the closure
 
     // Fetch a quote per candidate service in parallel.
     let cancelled = false;
     (async () => {
       // Initialize loading state
       const init: Record<string, VehicleQuote> = {};
-      for (const s of services) init[s] = { service: s, fare: 0, eta_min: 0, distance_km: 0, loading: true };
+      for (const svc of services) init[svc] = { service: svc, fare: 0, eta_min: 0, distance_km: 0, loading: true };
       setQuotes(init as any);
 
       const results = await Promise.allSettled(
-        services.map((s) =>
+        services.map((svc) =>
           api.post<QuoteResult>('/fare/quote', {
-            pickup: { lat: state.pickup.lat, lng: state.pickup.lng },
-            drop:   { lat: state.drop.lat, lng: state.drop.lng },
-            service: s,
+            pickup: { lat: s.pickup.lat, lng: s.pickup.lng },
+            drop:   { lat: s.drop.lat, lng: s.drop.lng },
+            service: svc,
             city: import.meta.env.VITE_DEFAULT_CITY,
           }),
         ),
@@ -56,6 +57,7 @@ export default function OrderPage() {
       const next: Record<string, VehicleQuote> = {};
       results.forEach((r, i) => {
         const svc = services[i];
+        if (!svc) return;
         if (r.status === 'fulfilled') {
           next[svc] = {
             service: svc,
@@ -80,7 +82,7 @@ export default function OrderPage() {
   const isParcel = state.category === 'parcel';
 
   async function confirm() {
-    if (!selected) return;
+    if (!selected || !state) return;
     if (isParcel) {
       if (!parcelOpen) { setParcelOpen(true); return; }
       if (!parcel.contents || !parcel.receiver_name || !parcel.receiver_phone) {

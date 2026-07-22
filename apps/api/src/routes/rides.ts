@@ -159,9 +159,9 @@ rides.post('/:orderId/complete', requireAuth, requireRole('rider'), async (c) =>
       { order_id: order.id, rider_id: uid, type: 'trip_earning', amount: breakup.rider_earning, note: 'Trip completed' },
       { order_id: order.id, rider_id: uid, type: 'commission', amount: -(breakup.commission ?? 0), note: 'Platform commission' },
     ]);
-    await db.rpc('increment_rider_stats', { p_rider: uid }).catch(() => {
-      /* function optional; safe no-op */
-    });
+    try {
+      await db.rpc('increment_rider_stats', { p_rider: uid });
+    } catch { /* function optional; safe no-op */ }
   }
   await db.from('riders').update({ status: 'online' }).eq('id', uid);
   await broadcast(c.env, `order:${orderId}`, 'status', { status: nextStatus, fare_final: fareFinal });
