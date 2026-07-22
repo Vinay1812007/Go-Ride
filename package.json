@@ -1,0 +1,25 @@
+{
+  "name": "goride",
+  "private": true,
+  "version": "0.1.0",
+  "description": "GoRide super-app — Rapido/Uber/Ola/Porter-style multi-service platform (bike, cab, auto, parcel) on 100% free tier.",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev:web": "npm --workspace apps/web run dev",
+    "dev:api": "npm --workspace apps/api run dev",
+    "build:web": "npm --workspace apps/web run build",
+    "build:api": "npm --workspace apps/api run build",
+    "deploy:web": "npm --workspace apps/web run build",
+    "deploy:api": "npm --workspace apps/api run deploy",
+    "typecheck": "npm --workspaces --if-present run typecheck",
+    "lint": "npm --workspaces --if-present run lint"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Vinay1812007/Go-Ride.git"
+  },
+  "license": "MIT"
+}
