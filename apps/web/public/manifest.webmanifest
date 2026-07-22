@@ -1,0 +1,13 @@
+{
+  "name": "GoRide",
+  "short_name": "GoRide",
+  "description": "Book rides, send parcels, track live.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#FFFFFF",
+  "theme_color": "#F5B60A",
+  "orientation": "portrait",
+  "icons": [
+    { "src": "/favicon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any" }
+  ]
+}

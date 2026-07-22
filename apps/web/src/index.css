@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #root {
+    height: 100%;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    font-family: 'Inter', ui-sans-serif, system-ui, -apple-system, sans-serif;
+  }
+  button, [role="button"] { -webkit-tap-highlight-color: transparent; touch-action: manipulation; }
+}
+
+@layer components {
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-xl px-4 py-3 font-semibold
+           transition active:scale-[0.98] disabled:opacity-50 disabled:pointer-events-none
+           text-base;
+  }
+  .btn-primary {
+    @apply btn bg-brand-500 text-surface-strong hover:bg-brand-400;
+  }
+  .btn-secondary {
+    @apply btn bg-surface-strong text-white hover:bg-slate-800;
+  }
+  .btn-ghost {
+    @apply btn text-surface-strong hover:bg-surface-muted;
+  }
+  .card {
+    @apply bg-white rounded-card shadow-card border border-surface-border p-4;
+  }
+  .sheet {
+    @apply fixed inset-x-0 bottom-0 bg-white rounded-t-3xl shadow-sheet
+           max-h-[85dvh] overflow-y-auto animate-slide-up
+           pb-[env(safe-area-inset-bottom)];
+  }
+  .sheet-handle {
+    @apply mx-auto my-2 h-1.5 w-10 rounded-full bg-slate-200;
+  }
+  .input {
+    @apply w-full rounded-xl border border-surface-border bg-white px-4 py-3
+           text-base focus:outline-none focus:ring-2 focus:ring-brand-500 focus:border-brand-500;
+  }
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-full bg-surface-muted px-3 py-1 text-sm font-medium;
+  }
+}
+
+/* MapLibre attribution styling — keep visible per OSM license */
+.maplibregl-ctrl-attrib {
+  @apply text-[10px] !bg-white/70 !text-slate-600;
+}
