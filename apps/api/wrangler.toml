@@ -1,0 +1,36 @@
+name = "goride-api"
+main = "src/index.ts"
+compatibility_date = "2024-10-01"
+compatibility_flags = ["nodejs_compat"]
+
+# CORS-friendly by default; production restricts in code via CORS_ORIGIN.
+workers_dev = true
+
+# KV namespace for cache (geocode + route responses). Bind by creating in dashboard
+# or with: wrangler kv:namespace create CACHE
+# Then paste id below.
+[[kv_namespaces]]
+binding = "CACHE"
+id = "REPLACE_WITH_KV_ID"
+
+# Scheduled prune of rider_locations (daily) + expired job offers (every minute).
+[triggers]
+crons = ["* * * * *", "0 3 * * *"]
+
+# Public environment vars (non-secret; put secrets via `wrangler secret put`).
+[vars]
+CORS_ORIGIN = "*"
+OSRM_URL = "https://router.project-osrm.org"
+GEOCODER = "nominatim"
+NOMINATIM_URL = "https://nominatim.openstreetmap.org"
+ROUTER = "osrm"
+WEBHOOK_SIGNING_VERSION = "v1"
+
+# Secrets managed by wrangler:
+#   SUPABASE_URL
+#   SUPABASE_SERVICE_ROLE_KEY
+#   SUPABASE_JWT_SECRET
+#   SUPABASE_ANON_KEY
+#   ORS_KEY               (optional, for openrouteservice)
+#   GEOCODER_KEY          (optional, for LocationIQ/Geoapify)
+#   SHARE_TOKEN_SECRET    (32+ random chars)
