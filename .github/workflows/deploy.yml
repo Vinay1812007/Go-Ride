@@ -31,26 +31,36 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -e
-          LIST=$(npx wrangler kv namespace list 2>/dev/null || echo "[]")
-          # binding after this deploy is named "goride-api-CACHE" (worker + binding)
-          ID=$(echo "$LIST" | node -e '
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/storage/kv/namespaces"
+
+          # 1. Look up existing namespace via CF REST (unambiguous JSON)
+          LIST_JSON=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API?per_page=100")
+          ID=$(printf '%s' "$LIST_JSON" | node -e '
             let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
               try {
-                const j = JSON.parse(s.trim().split("\n").filter(l=>l.trim().startsWith("[")||l.trim().startsWith("{")).join(""));
-                const hit = j.find(n => n.title === "goride-api-CACHE");
+                const j = JSON.parse(s);
+                const hit = (j.result||[]).find(n => n.title === "goride-api-CACHE");
                 process.stdout.write(hit ? hit.id : "");
-              } catch { process.stdout.write(""); }
+              } catch (e) { console.error("parse error:", e.message); process.exit(2); }
             })')
+
+          # 2. Create if missing
           if [ -z "$ID" ]; then
-            OUT=$(npx wrangler kv namespace create CACHE)
-            echo "$OUT"
-            ID=$(echo "$OUT" | grep -oE 'id = "[a-f0-9]+"' | head -1 | grep -oE '[a-f0-9]{20,}')
+            CREATE_JSON=$(curl -sS -X POST -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "Content-Type: application/json" \
+              -d '{"title":"goride-api-CACHE"}' "$API")
+            ID=$(printf '%s' "$CREATE_JSON" | node -e '
+              let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{
+                const j = JSON.parse(s);
+                if (!j.success) { console.error("create failed:", JSON.stringify(j.errors)); process.exit(3); }
+                process.stdout.write(j.result.id);
+              })')
           fi
-          if [ -z "$ID" ]; then
-            echo "❌ Could not resolve KV namespace id"; exit 1
-          fi
+
+          if [ -z "$ID" ]; then echo "❌ Could not resolve KV namespace id"; exit 1; fi
           echo "✅ KV namespace id: $ID"
-          # Patch wrangler.toml in place
+
+          # 3. Patch wrangler.toml in place
           sed -i "s/REPLACE_WITH_KV_ID/$ID/g" wrangler.toml
           grep -A1 '\[\[kv_namespaces\]\]' wrangler.toml
 
