@@ -145,6 +145,22 @@ orders.post('/:id/cancel', requireAuth, async (c) => {
     .update({ status: nextStatus, cancelled_reason: body.reason, cancelled_at: new Date().toISOString() })
     .eq('id', order.id);
   await broadcast(c.env, `order:${order.id}`, 'status', { status: nextStatus });
+
+  // Free the rider — status was 'on_trip' during the ride, put them back
+  // to 'online' so they can accept new offers and the captain UI unfreezes.
+  // Also expire any still-pending job_offers for this order.
+  if (order.rider_id) {
+    await db.from('riders').update({ status: 'online', last_seen: new Date().toISOString() }).eq('id', order.rider_id);
+    await db.from('job_offers')
+      .update({ response: 'expired', responded_at: new Date().toISOString() })
+      .eq('order_id', order.id)
+      .is('response', null);
+    // Broadcast to the rider so their captain shell refreshes immediately
+    await broadcast(c.env, `rider:${order.rider_id}`, 'trip_ended', {
+      order_id: order.id,
+      reason: nextStatus,
+    });
+  }
   return c.json({ ok: true, status: nextStatus });
 });
 

@@ -74,10 +74,37 @@ function HomePage({ me, refresh }: { me: MeResponse | null; refresh: () => Promi
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [earnings, setEarnings] = useState<Earnings | null>(null);
+  const [tripEndedFlash, setTripEndedFlash] = useState<string | null>(null);
 
   const rider = me?.rider ?? null;
   const status = rider?.status ?? 'offline';
   const uid = me?.profile.id ?? null;
+
+  // Listen for 'trip_ended' broadcasts (customer cancel, admin force-cancel)
+  // so the captain shell instantly reflects that they're free again.
+  useEffect(() => {
+    if (!uid) return;
+    const ch = supabase.channel(`rider:${uid}`, { config: { broadcast: { self: false } } })
+      .on('broadcast', { event: 'trip_ended' }, async (msg) => {
+        const reason = msg.payload?.reason ?? 'ended';
+        setTripEndedFlash(
+          reason === 'cancelled_customer' ? 'Customer cancelled — you\'re free to accept new trips.' :
+          reason === 'cancelled_rider'    ? 'Trip cancelled.' :
+          'Trip ended.',
+        );
+        await refresh();
+        setTimeout(() => setTripEndedFlash(null), 6000);
+      })
+      .subscribe();
+    return () => { void supabase.removeChannel(ch); };
+  }, [uid, refresh]);
+
+  // Also refresh profile when tab regains focus — cheap safety net.
+  useEffect(() => {
+    const onFocus = () => { void refresh(); };
+    window.addEventListener('focus', onFocus);
+    return () => window.removeEventListener('focus', onFocus);
+  }, [refresh]);
 
   // Live offers (only when online)
   const { offers, dismiss } = useOffers({ uid, enabled: status === 'online' });
@@ -174,6 +201,12 @@ function HomePage({ me, refresh }: { me: MeResponse | null; refresh: () => Promi
           </div>
         )}
 
+        {tripEndedFlash && (
+          <div className="rounded-xl bg-emerald-50 border border-emerald-500 p-3 text-sm text-emerald-800">
+            {tripEndedFlash}
+          </div>
+        )}
+
         {/* Status card */}
         <div className="card">
           <div className="text-sm text-slate-500 mb-2">You are</div>
@@ -186,7 +219,7 @@ function HomePage({ me, refresh }: { me: MeResponse | null; refresh: () => Promi
           </div>
           <button
             onClick={toggle}
-            disabled={busy || kycBlocked || status === 'on_trip'}
+            disabled={busy || kycBlocked}
             className={status === 'offline' ? 'btn-primary w-full h-14 text-lg' : 'btn-secondary w-full h-14 text-lg'}
           >
             {busy ? '…' : kycBlocked ? 'Awaiting KYC approval' : status === 'offline' ? 'Go online' : 'Go offline'}
@@ -195,6 +228,11 @@ function HomePage({ me, refresh }: { me: MeResponse | null; refresh: () => Promi
           {status === 'online' && (
             <p className="text-xs text-slate-500 mt-2 text-center">
               Location is being shared while you're online.
+            </p>
+          )}
+          {status === 'on_trip' && (
+            <p className="text-xs text-slate-500 mt-2 text-center">
+              Tapping "Go offline" while on trip will drop you from the current job.
             </p>
           )}
         </div>
