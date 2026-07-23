@@ -145,7 +145,20 @@ export default function HomePage() {
             </button>
           </div>
 
-          <div className="mt-6 flex items-center justify-between text-xs">
+          {/* Food shortcut — separate flow from ride/parcel */}
+          <Link
+            to="/food"
+            className="mt-4 flex items-center gap-3 rounded-xl bg-brand-50 border border-brand-200 p-3 hover:bg-brand-100 transition"
+          >
+            <div className="h-10 w-10 rounded-xl bg-brand-500 grid place-items-center text-xl">🍽️</div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-brand-800">Order food</div>
+              <div className="text-xs text-brand-800/70 truncate">Biryani, South Indian, and more from local kitchens</div>
+            </div>
+            <span className="text-brand-800 font-bold">→</span>
+          </Link>
+
+          <div className="mt-4 flex items-center justify-between text-xs">
             <Link to="/captain" className="text-slate-500 hover:text-surface-strong font-medium">
               Drive with GoRide →
             </Link>

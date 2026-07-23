@@ -6,6 +6,9 @@ import OrderPage from './features/customer/OrderPage';
 import TrackingPage from './features/customer/TrackingPage';
 import HistoryPage from './features/customer/HistoryPage';
 import PublicTrackPage from './features/customer/PublicTrackPage';
+import FoodBrowsePage from './features/customer/FoodBrowsePage';
+import RestaurantPage from './features/customer/RestaurantPage';
+import FoodCheckoutPage from './features/customer/FoodCheckoutPage';
 import CaptainShell from './features/rider/CaptainShell';
 import AdminShell from './features/admin/AdminShell';
 import DevelopersPage from './features/developers/DevelopersPage';
@@ -101,6 +104,9 @@ export default function App() {
         <Route path="/order/:id" element={<OrderPage />} />
         <Route path="/track/:id" element={<TrackingPage />} />
         <Route path="/history" element={<HistoryPage />} />
+        <Route path="/food" element={<FoodBrowsePage />} />
+        <Route path="/food/checkout" element={<FoodCheckoutPage />} />
+        <Route path="/food/:restaurantId" element={<RestaurantPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );
@@ -154,6 +160,9 @@ export default function App() {
       <Route path="/order/:id" element={<OrderPage />} />
       <Route path="/track/:id" element={<TrackingPage />} />
       <Route path="/history" element={<HistoryPage />} />
+      <Route path="/food" element={<FoodBrowsePage />} />
+      <Route path="/food/checkout" element={<FoodCheckoutPage />} />
+      <Route path="/food/:restaurantId" element={<RestaurantPage />} />
       <Route path="/captain/*" element={<CaptainShell />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

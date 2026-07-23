@@ -46,11 +46,17 @@ export const createOrderBody = z.object({
       receiver_phone: z.string().min(6).max(20),
     })
     .optional(),
+  restaurant_id: z.string().uuid().optional(),
   food: z
     .object({
-      restaurant: z.string(),
-      items: z.array(z.object({ name: z.string(), qty: z.number().int().positive(), price: z.number().nonnegative() })),
-      instructions: z.string().optional(),
+      items: z.array(z.object({
+        menu_item_id: z.string().uuid(),
+        name: z.string(),
+        qty: z.number().int().positive().max(20),
+        price: z.number().nonnegative(),
+      })).min(1).max(50),
+      instructions: z.string().max(300).optional(),
+      subtotal: z.number().nonnegative(),      // client-computed, we re-verify server-side
     })
     .optional(),
 });

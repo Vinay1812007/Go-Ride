@@ -15,12 +15,13 @@ on:
         default: 'all'
         type: choice
         options:
-          - all              # 0001 + 0002 + 0003 + 0004 + 0005 + seed
+          - all              # 0001 + 0002 + 0003 + 0004 + 0005 + 0006 + seed
           - schema-only      # 0001
           - rls-only         # 0002
           - partner-orders   # 0003
           - scheduled-rides  # 0004
           - chat             # 0005
+          - food             # 0006
           - seed-only        # seed.sql
 
 jobs:
@@ -58,6 +59,7 @@ jobs:
               run_sql supabase/migrations/0003_partner_orders.sql
               run_sql supabase/migrations/0004_scheduled_rides.sql
               run_sql supabase/migrations/0005_chat.sql
+              run_sql supabase/migrations/0006_food.sql
               run_sql supabase/seed.sql
               ;;
             schema-only)     run_sql supabase/migrations/0001_init.sql ;;
@@ -65,6 +67,7 @@ jobs:
             partner-orders)  run_sql supabase/migrations/0003_partner_orders.sql ;;
             scheduled-rides) run_sql supabase/migrations/0004_scheduled_rides.sql ;;
             chat)            run_sql supabase/migrations/0005_chat.sql ;;
+            food)            run_sql supabase/migrations/0006_food.sql ;;
             seed-only)       run_sql supabase/seed.sql ;;
           esac
 

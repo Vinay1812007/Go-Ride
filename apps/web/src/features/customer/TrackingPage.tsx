@@ -23,6 +23,11 @@ interface OrderDetail {
   otp?: string;
   share_token?: string;
   rider_id?: string;
+  food_details?: {
+    items: Array<{ menu_item_id: string; name: string; qty: number; price: number }>;
+    instructions?: string | null;
+    subtotal: number;
+  };
 }
 
 interface RiderCard {
@@ -135,6 +140,20 @@ export default function TrackingPage() {
               <div className="text-xs uppercase tracking-wider text-brand-700">Start-trip OTP</div>
               <div className="text-3xl font-bold tracking-widest">{order.otp}</div>
               <div className="text-xs text-slate-500 mt-1">Share with your captain to start the trip.</div>
+            </div>
+          )}
+
+          {order.service === 'food' && order.food_details && (
+            <div className="mt-4 rounded-xl bg-surface-muted p-3 text-sm">
+              <div className="text-xs uppercase text-slate-400 mb-1">Your order</div>
+              <ul className="space-y-1">
+                {order.food_details.items.map((it) => (
+                  <li key={it.menu_item_id} className="flex justify-between">
+                    <span>{it.qty} × {it.name}</span>
+                    <span className="text-slate-500">{inr(it.qty * it.price)}</span>
+                  </li>
+                ))}
+              </ul>
             </div>
           )}
 

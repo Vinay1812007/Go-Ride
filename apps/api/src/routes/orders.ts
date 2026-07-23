@@ -46,6 +46,31 @@ orders.post('/', requireAuth, requireRole('customer'), async (c) => {
     return c.json({ error: { code: 'missing_parcel' } }, 400);
   }
 
+  // Food-service payload sanity
+  if (body.service === 'food' && (!body.food || !body.restaurant_id)) {
+    return c.json({ error: { code: 'missing_food' } }, 400);
+  }
+
+  // For food, re-verify the cart total server-side using authoritative prices.
+  // This prevents a malicious client from paying ₹10 for a ₹300 biryani.
+  let foodSubtotal = 0;
+  if (body.service === 'food' && body.food && body.restaurant_id) {
+    const db0 = admin(c.env);
+    const { data: r } = await db0.from('restaurants').select('id, min_order, active').eq('id', body.restaurant_id).maybeSingle();
+    if (!r || !r.active) return c.json({ error: { code: 'restaurant_unavailable' } }, 404);
+    const ids = body.food.items.map((i: { menu_item_id: string }) => i.menu_item_id);
+    const { data: items } = await db0.from('menu_items').select('id, name, price, available').in('id', ids);
+    const priceById = new Map((items ?? []).map((it) => [it.id, it]));
+    for (const line of body.food.items) {
+      const it = priceById.get(line.menu_item_id);
+      if (!it || !it.available) return c.json({ error: { code: 'item_unavailable', message: `${line.name} is not available` } }, 400);
+      foodSubtotal += Number(it.price) * line.qty;
+    }
+    if (foodSubtotal < Number(r.min_order)) {
+      return c.json({ error: { code: 'min_order', message: `Minimum order is ₹${r.min_order}` } }, 400);
+    }
+  }
+
   const { breakup, route, card } = await quoteInternal(c.env, {
     pickup: body.pickup,
     drop: body.drop,
@@ -74,6 +99,16 @@ orders.post('/', requireAuth, requireRole('customer'), async (c) => {
     if (err) return c.json({ error: { code: 'bad_schedule', message: err } }, 400);
   }
 
+  // For food orders, fare_estimate = delivery fee + food subtotal, and the
+  // breakup gets an extra `food_subtotal` field so the customer sees the
+  // split at checkout.
+  const finalFareEstimate = body.service === 'food'
+    ? Number(breakup.total) + foodSubtotal
+    : Number(breakup.total);
+  const finalBreakup = body.service === 'food'
+    ? { ...breakup, food_subtotal: foodSubtotal, delivery_fee: breakup.total }
+    : breakup;
+
   const { data: inserted, error } = await db
     .from('orders')
     .insert({
@@ -92,11 +127,15 @@ orders.post('/', requireAuth, requireRole('customer'), async (c) => {
       distance_km: breakup.km,
       duration_min: breakup.minutes,
       route_polyline: route.polyline,
-      fare_estimate: breakup.total,
-      fare_breakup: breakup,
+      fare_estimate: finalFareEstimate,
+      fare_breakup: finalBreakup,
       payment_method: body.payment_method,
       otp: otp4(),
       parcel_details: body.parcel ?? null,
+      restaurant_id: body.restaurant_id ?? null,
+      food_details: body.food
+        ? { items: body.food.items, instructions: body.food.instructions ?? null, subtotal: foodSubtotal }
+        : null,
       share_token: token,
     })
     .select('id, order_no, otp, share_token, scheduled_at, status')
@@ -116,8 +155,8 @@ orders.post('/', requireAuth, requireRole('customer'), async (c) => {
     status: inserted.status,
     scheduled_at: inserted.scheduled_at,
     tracking_url: `/t/${inserted.order_no}?k=${inserted.share_token}`,
-    fare: breakup.total,
-    fare_breakup: breakup,
+    fare: finalFareEstimate,
+    fare_breakup: finalBreakup,
     distance_km: breakup.km,
     duration_min: breakup.minutes,
   });

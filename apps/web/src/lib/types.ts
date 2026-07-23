@@ -77,3 +77,45 @@ export interface LatLng {
   lat: number;
   lng: number;
 }
+
+export interface Restaurant {
+  id: string;
+  name: string;
+  cuisine: string;
+  description?: string | null;
+  address: string;
+  city: string;
+  lat: number;
+  lng: number;
+  phone?: string | null;
+  image_url?: string | null;
+  avg_prep_min: number;
+  min_order: number;
+  rating?: number | null;
+  active?: boolean;
+}
+
+export interface MenuItem {
+  id: string;
+  name: string;
+  description?: string | null;
+  price: number;
+  category: string;
+  image_url?: string | null;
+  is_veg: boolean;
+  available: boolean;
+  sort_order?: number;
+}
+
+export interface MenuGroup {
+  category: string;
+  items: MenuItem[];
+}
+
+export interface CartLine {
+  menu_item_id: string;
+  name: string;
+  qty: number;
+  price: number;
+  is_veg: boolean;
+}

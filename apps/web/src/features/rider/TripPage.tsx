@@ -25,6 +25,11 @@ interface Order {
   payment_method: 'cash' | 'upi' | 'wallet';
   customer_id: string;
   parcel_details?: { receiver_name: string; receiver_phone: string; contents: string; weight_kg: number };
+  food_details?: {
+    items: Array<{ menu_item_id: string; name: string; qty: number; price: number }>;
+    instructions?: string | null;
+    subtotal: number;
+  };
 }
 
 export default function TripPage() {
@@ -138,6 +143,27 @@ export default function TripPage() {
             </div>
           </div>
           <StatusStepper status={order.status} />
+
+          {/* Food order — items list, visible from acceptance so captain knows
+              what to collect from the restaurant */}
+          {order.service === 'food' && order.food_details && (
+            <div className="mt-4 rounded-xl bg-surface-muted p-3 text-sm">
+              <div className="text-xs uppercase text-slate-400 mb-1">Pick up from restaurant</div>
+              <ul className="space-y-1">
+                {order.food_details.items.map((it) => (
+                  <li key={it.menu_item_id} className="flex justify-between">
+                    <span>{it.qty} × {it.name}</span>
+                    <span className="text-slate-500">{inr(it.qty * it.price)}</span>
+                  </li>
+                ))}
+              </ul>
+              {order.food_details.instructions && (
+                <div className="mt-2 text-xs bg-amber-50 border border-amber-200 rounded-md px-2 py-1 text-amber-900">
+                  📝 {order.food_details.instructions}
+                </div>
+              )}
+            </div>
+          )}
 
           {/* Parcel receiver details (visible after picked_up) */}
           {isParcel && order.parcel_details && ['arrived', 'picked_up', 'in_transit'].includes(order.status) && (

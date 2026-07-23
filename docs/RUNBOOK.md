@@ -572,11 +572,60 @@ migration is idempotent).
 
 ---
 
-## 16. Phase 2 (not built yet)
+## 16. Food delivery
 
-- Food delivery UI (schema and rate cards already support it).
+Fifth vertical. Customer browses restaurants → picks items → checks out →
+same captain-driven dispatch and tracking flow as every other vertical.
+
+- **Customer flow:** Home → **Order food** shortcut → `/food` browse (search
+  + cuisine chips) → tap a restaurant → menu with per-item steppers →
+  sticky cart bar (green) → checkout screen shows items / delivery address
+  / instructions / payment / bill split → **Place order** → normal
+  Tracking page with the item list added.
+- **Fare split:** `orders.fare_estimate` = food subtotal + delivery fee.
+  The delivery fee uses the `food` rate card in `rate_cards`
+  (base 30 + per_km 8 + min 40). The fare_breakup JSON adds
+  `food_subtotal` and `delivery_fee` fields so admin reports can split them.
+- **Server-side verification:** the API refetches each menu item by ID
+  and recomputes the subtotal from authoritative prices before writing
+  the order. A tampered client can't buy a ₹300 biryani for ₹10. Also
+  enforces `min_order` and `item.available`.
+- **Cart persistence:** localStorage-backed at `goride:food-cart`. Switching
+  restaurants prompts "Clear cart?" — one restaurant per order (matches
+  Swiggy/Zomato).
+- **Captain UX:** during a food trip, the top of the TripPage shows the
+  item list ("2 × Chicken Biryani", "1 × Butter Naan") plus any
+  customer instructions so they know what to collect at the counter.
+- **Schema:** `restaurants(id, name, cuisine, address, lat, lng, phone,
+  image_url, avg_prep_min, min_order, active, rating)` +
+  `menu_items(restaurant_id, name, description, price, category, is_veg,
+  available, sort_order)` + `orders.restaurant_id` FK. Public read RLS
+  on active rows so browse works without auth; admin-only writes.
+- **Seed:** five real Hyderabad restaurants (Paradise, Bawarchi, Ohri's,
+  Chutneys, Pista House) with 4–5 menu items each — enough for a demo
+  or screenshots without needing to add anything by hand.
+
+Schema is in `supabase/migrations/0006_food.sql` — apply via
+**Actions → Apply Supabase migrations → target: food** (or `all`).
+
+### Adding a restaurant (for now, before the admin CRUD lands)
+
+```sql
+insert into restaurants (name, cuisine, address, city, lat, lng, phone, avg_prep_min, min_order, rating)
+values ('Beijing Bites', 'Chinese', 'Jubilee Hills Road No. 36', 'Hyderabad', 17.4315, 78.4090, '+911140000006', 20, 150, 4.3);
+
+insert into menu_items (restaurant_id, name, price, category, is_veg, sort_order) values
+  ((select id from restaurants where name = 'Beijing Bites'), 'Veg Manchurian', 220, 'Starters', true, 1),
+  ((select id from restaurants where name = 'Beijing Bites'), 'Chicken Fried Rice', 260, 'Rice', false, 2);
+```
+
+---
+
+## 17. Phase 2 (not built yet)
+
 - Promo codes / referral bonuses.
 - Self-hosted OSRM on Fly.io free tier.
 - Push notifications (Capacitor + FCM).
+- Admin CRUD for restaurants + menu items (for now, use SQL — §16).
 
 None of these require schema migration beyond adding a column or two.
