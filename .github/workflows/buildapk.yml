@@ -172,12 +172,18 @@ jobs:
           KEY_ALIAS:         ${{ secrets.KEY_ALIAS }}
           KEY_PASSWORD:      ${{ secrets.KEY_PASSWORD }}
         run: |
+          set -e
+          # Gradle resolves relative -P signing paths from the app module dir
+          # (apps/web/android/app/), so 'app/release.keystore' becomes
+          # 'apps/web/android/app/app/release.keystore' — wrong. Use absolute.
+          KEYSTORE_PATH="$GITHUB_WORKSPACE/apps/web/android/app/release.keystore"
+          ls -la "$KEYSTORE_PATH"
           chmod +x gradlew
           ./gradlew assembleRelease \
-            -Pandroid.injected.signing.store.file=app/release.keystore \
-            -Pandroid.injected.signing.store.password=$KEYSTORE_PASSWORD \
-            -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
-            -Pandroid.injected.signing.key.password=$KEY_PASSWORD
+            -Pandroid.injected.signing.store.file="$KEYSTORE_PATH" \
+            -Pandroid.injected.signing.store.password="$KEYSTORE_PASSWORD" \
+            -Pandroid.injected.signing.key.alias="$KEY_ALIAS" \
+            -Pandroid.injected.signing.key.password="$KEY_PASSWORD"
 
       - name: Build unsigned debug APK
         if: steps.keystore.outputs.have != 'true'
