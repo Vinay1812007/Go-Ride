@@ -137,7 +137,32 @@ jobs:
         working-directory: apps/web/android
         env:
           B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
-        run: printf "%s" "$B64" | base64 -d > app/release.keystore
+        run: |
+          set -e
+          mkdir -p app
+          # Length of the raw secret (before any decode)
+          echo "Secret length: ${#B64} chars"
+          # Strip any accidental whitespace / newlines that snuck in during
+          # copy-paste into the GH Secrets textarea
+          CLEAN=$(printf "%s" "$B64" | tr -d ' \t\r\n')
+          echo "Cleaned length: ${#CLEAN} chars"
+          # Decode; -w0 makes older base64 forgiving, -d ignores garbage
+          printf "%s" "$CLEAN" | base64 -d > app/release.keystore
+          if [ ! -s app/release.keystore ]; then
+            echo "❌ release.keystore is empty after decode — secret value is invalid"
+            exit 1
+          fi
+          SIZE=$(stat -c%s app/release.keystore)
+          echo "✓ Keystore decoded: $SIZE bytes"
+          # A valid Android keystore is >= ~2000 bytes; anything smaller is broken
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "❌ Keystore looks truncated (< 1000 bytes)"
+            exit 1
+          fi
+          # Verify it's really a keystore by asking keytool
+          keytool -list -keystore app/release.keystore -storepass "${{ secrets.KEYSTORE_PASSWORD }}" >/dev/null 2>&1 && \
+            echo "✓ keytool -list succeeded" || \
+            (echo "❌ keytool -list failed — password wrong or file corrupt"; exit 1)
 
       - name: Build signed release APK
         if: steps.keystore.outputs.have == 'true'
