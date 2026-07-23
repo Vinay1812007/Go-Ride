@@ -539,11 +539,43 @@ Schema is in `supabase/migrations/0004_scheduled_rides.sql` — apply via
 
 ---
 
-## 15. Phase 2 (not built yet)
+## 15. In-app chat
+
+Two-party chat between the customer and their assigned captain.
+
+- **Customer flow:** Tracking page → **💬 Chat** button next to Call / Share.
+  Unread count shows as a red badge; opening the drawer marks incoming
+  messages as read server-side.
+- **Captain flow:** Trip page → **💬 Chat** button in the top-right header.
+  Same badge behaviour.
+- **Chat window:** open only during an active trip (`accepted`, `arrived`,
+  `picked_up`, `in_transit`). Before accept and after complete/cancel, the
+  drawer is read-only. The API returns `409 chat_closed` on any send
+  attempt outside the window.
+- **Realtime:** Worker broadcasts `event='message'` on the `order:{id}`
+  channel after every insert, plus a preview to `rider:{uid}` /
+  `customer:{uid}` so the receiving party's badge lights up even if
+  they're not on the trip screen.
+- **Quick replies:** four canned lines each ("On my way", "Reached",
+  "Stuck in traffic", "Please share exact location" for riders;
+  "I'm coming down", "Please wait 2 min", "I'm at the gate", "Cancel
+  please" for customers). Tap to send.
+- **Schema:** `messages(id, order_id, sender_role, sender_id, body,
+  created_at, read_at)`. RLS lets only the two parties on the order
+  select/insert; admins can read for support. Two partial indexes:
+  `(order_id, created_at)` for the timeline and
+  `(order_id, sender_role) WHERE read_at IS NULL` for unread counts.
+
+Schema is in `supabase/migrations/0005_chat.sql` — apply via
+**Actions → Apply Supabase migrations → target: chat** (or `all`; every
+migration is idempotent).
+
+---
+
+## 16. Phase 2 (not built yet)
 
 - Food delivery UI (schema and rate cards already support it).
 - Promo codes / referral bonuses.
-- In-app chat between customer and captain.
 - Self-hosted OSRM on Fly.io free tier.
 - Push notifications (Capacitor + FCM).
 

@@ -4,8 +4,10 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import MapView from '@/components/MapView';
 import StatusStepper from '@/components/ui/StatusStepper';
+import ChatDrawer from '@/components/ChatDrawer';
 import { api, ApiError } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
+import { useChatUnread } from '@/hooks/useChatUnread';
 import { inr, serviceLabel, statusLabel } from '@/lib/format';
 import type { OrderStatus } from '@/lib/types';
 
@@ -33,6 +35,8 @@ export default function TripPage() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [rating, setRating] = useState(0);
+  const { unread, drawerOpen, openDrawer, closeDrawer } = useChatUnread(orderId, 'rider');
+  const chatEnabled = !!order && ['accepted', 'arrived', 'picked_up', 'in_transit'].includes(order.status);
 
   useEffect(() => {
     if (!orderId) return;
@@ -92,14 +96,37 @@ export default function TripPage() {
         />
       </div>
 
-      <header className="absolute top-0 inset-x-0 z-20 p-3 flex justify-between">
+      <header className="absolute top-0 inset-x-0 z-20 p-3 flex justify-between items-start gap-2">
         <div className="rounded-xl bg-white shadow-card px-3 py-2 text-xs font-medium">
           #{order.order_no}
         </div>
-        <div className="rounded-xl bg-white shadow-card px-3 py-2 text-xs">
-          {serviceLabel(order.service as any)}
+        <div className="flex gap-2">
+          <button
+            onClick={openDrawer}
+            className="relative rounded-xl bg-white shadow-card px-3 py-2 text-xs font-medium"
+            aria-label="Chat with customer"
+          >
+            💬 Chat
+            {unread > 0 && (
+              <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 grid place-items-center">
+                {unread > 9 ? '9+' : unread}
+              </span>
+            )}
+          </button>
+          <div className="rounded-xl bg-white shadow-card px-3 py-2 text-xs">
+            {serviceLabel(order.service as any)}
+          </div>
         </div>
       </header>
+
+      <ChatDrawer
+        orderId={order.id}
+        open={drawerOpen}
+        onClose={closeDrawer}
+        myRole="rider"
+        otherLabel="Customer"
+        chatEnabled={chatEnabled}
+      />
 
       <div className="sheet z-10" style={{ bottom: 0 }}>
         <div className="sheet-handle" />

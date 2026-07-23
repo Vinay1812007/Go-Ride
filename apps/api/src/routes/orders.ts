@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/env';
 import { requireAuth, requireRole } from '../lib/auth';
 import { admin, broadcast } from '../lib/supabase';
-import { createOrderBody, cancelBody, rateBody, rescheduleBody } from '../lib/schemas';
+import { createOrderBody, cancelBody, rateBody, rescheduleBody, sendMessageBody } from '../lib/schemas';
 import { quoteInternal } from './fare';
 import { dispatch } from '../lib/dispatch';
 
@@ -266,6 +266,117 @@ orders.post('/:id/rate', requireAuth, requireRole('customer'), async (c) => {
     if (avg) await db.from('profiles').update({ rating: Math.round(avg * 10) / 10 }).eq('id', order.rider_id);
   }
   return c.json({ ok: true });
+});
+
+// ============================================================================
+// Chat messages
+// ----------------------------------------------------------------------------
+// Two-party chat between the customer and the assigned captain. Rows are
+// immutable except for read_at, which flips null → now() when the recipient
+// opens the drawer.
+// ============================================================================
+
+// GET /:id/messages — list messages, mark received as read
+orders.get('/:id/messages', requireAuth, async (c) => {
+  const uid = c.get('userId')!;
+  const role = c.get('userRole');
+  const orderId = c.req.param('id');
+  const db = admin(c.env);
+
+  // Membership check — do this ourselves rather than relying on RLS because
+  // this handler uses the service-role client for the read.
+  const { data: order } = await db
+    .from('orders')
+    .select('id, customer_id, rider_id')
+    .eq('id', orderId)
+    .maybeSingle();
+  if (!order) return c.json({ error: { code: 'not_found' } }, 404);
+  const isCustomer = order.customer_id === uid;
+  const isRider = order.rider_id === uid;
+  if (!isCustomer && !isRider && role !== 'admin') {
+    return c.json({ error: { code: 'forbidden' } }, 403);
+  }
+
+  const { data: messages } = await db
+    .from('messages')
+    .select('id, sender_role, sender_id, body, created_at, read_at')
+    .eq('order_id', orderId)
+    .order('created_at', { ascending: true })
+    .limit(500);
+
+  // Mark unread-by-me messages as read (best-effort, don't fail the read).
+  const myRole: 'customer' | 'rider' | null =
+    isCustomer ? 'customer' : isRider ? 'rider' : null;
+  if (myRole) {
+    const otherRole = myRole === 'customer' ? 'rider' : 'customer';
+    await db
+      .from('messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('order_id', orderId)
+      .eq('sender_role', otherRole)
+      .is('read_at', null);
+  }
+
+  return c.json({ messages: messages ?? [] });
+});
+
+// POST /:id/messages — send a message
+orders.post('/:id/messages', requireAuth, async (c) => {
+  const body = await parse(c, sendMessageBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const uid = c.get('userId')!;
+  const role = c.get('userRole');
+  const orderId = c.req.param('id');
+  const db = admin(c.env);
+
+  const { data: order } = await db
+    .from('orders')
+    .select('id, customer_id, rider_id, status')
+    .eq('id', orderId)
+    .maybeSingle();
+  if (!order) return c.json({ error: { code: 'not_found' } }, 404);
+
+  const isCustomer = order.customer_id === uid;
+  const isRider = order.rider_id === uid;
+  if (!isCustomer && !isRider) return c.json({ error: { code: 'forbidden' } }, 403);
+
+  // Only allow chatting while the trip is live. Once completed/cancelled,
+  // the drawer is read-only.
+  const openStatuses = ['accepted', 'arrived', 'picked_up', 'in_transit'];
+  if (!openStatuses.includes(order.status)) {
+    return c.json({ error: { code: 'chat_closed', message: 'Chat is only available during an active trip' } }, 409);
+  }
+
+  const senderRole: 'customer' | 'rider' = isCustomer ? 'customer' : 'rider';
+
+  const { data: inserted, error } = await db
+    .from('messages')
+    .insert({
+      order_id: orderId,
+      sender_role: senderRole,
+      sender_id: uid,
+      body: body.body.trim(),
+    })
+    .select('id, sender_role, sender_id, body, created_at, read_at')
+    .single();
+  if (error || !inserted) return c.json({ error: { code: 'insert_failed', message: error?.message } }, 500);
+
+  // Realtime push so the other side updates without a poll. Best-effort —
+  // if it drops, the next GET /messages still returns everything.
+  c.executionCtx.waitUntil(
+    broadcast(c.env, `order:${orderId}`, 'message', inserted).catch(() => {}),
+  );
+  // Also notify the other party's rider/customer channel so their unread
+  // badge lights up even without the trip screen open.
+  const otherId = isCustomer ? order.rider_id : order.customer_id;
+  if (otherId) {
+    const otherChannel = isCustomer ? `rider:${otherId}` : `customer:${otherId}`;
+    c.executionCtx.waitUntil(
+      broadcast(c.env, otherChannel, 'message', { order_id: orderId, preview: inserted.body.slice(0, 80) }).catch(() => {}),
+    );
+  }
+
+  return c.json({ message: inserted });
 });
 
 export default orders;

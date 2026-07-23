@@ -3,8 +3,10 @@ import { useParams, useNavigate, Link } from 'react-router-dom';
 import MapView from '@/components/MapView';
 import StatusStepper from '@/components/ui/StatusStepper';
 import LoadingScreen from '@/components/ui/LoadingScreen';
+import ChatDrawer from '@/components/ChatDrawer';
 import { api } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
+import { useChatUnread } from '@/hooks/useChatUnread';
 import type { LatLng, OrderStatus } from '@/lib/types';
 import { inr, statusLabel, isFinalStatus } from '@/lib/format';
 
@@ -38,6 +40,8 @@ export default function TrackingPage() {
   const [rider, setRider] = useState<RiderCard | null>(null);
   const [riderPos, setRiderPos] = useState<(LatLng & { heading?: number }) | null>(null);
   const [rating, setRating] = useState<number>(0);
+  const { unread, drawerOpen, openDrawer, closeDrawer } = useChatUnread(id, 'customer');
+  const chatEnabled = !!order && ['accepted', 'arrived', 'picked_up', 'in_transit'].includes(order.status);
 
   // Initial fetch
   useEffect(() => {
@@ -151,17 +155,28 @@ export default function TrackingPage() {
           )}
 
           {!isFinalStatus(order.status) && order.status !== 'searching' && (
-            <div className="mt-4 grid grid-cols-2 gap-2">
-              <a href="tel:+911234567890" className="btn-secondary">Call</a>
-              {order.share_token && (
+            <div className="mt-4 grid grid-cols-3 gap-2">
+              <a href="tel:+911234567890" className="btn-secondary text-center">Call</a>
+              <button
+                onClick={openDrawer}
+                className="relative btn-ghost border border-surface-border"
+              >
+                💬 Chat
+                {unread > 0 && (
+                  <span className="absolute -top-1 -right-1 bg-red-600 text-white text-[10px] font-bold rounded-full min-w-[18px] h-[18px] px-1 grid place-items-center">
+                    {unread > 9 ? '9+' : unread}
+                  </span>
+                )}
+              </button>
+              {order.share_token ? (
                 <Link
                   to={`/t/${order.order_no}?k=${order.share_token}`}
                   target="_blank"
-                  className="btn-ghost border border-surface-border"
+                  className="btn-ghost border border-surface-border text-center"
                 >
-                  Share trip
+                  Share
                 </Link>
-              )}
+              ) : <span />}
             </div>
           )}
 
@@ -170,6 +185,16 @@ export default function TrackingPage() {
               Cancel order
             </button>
           )}
+
+          {/* Chat drawer — mounts once order is loaded */}
+          <ChatDrawer
+            orderId={order.id}
+            open={drawerOpen}
+            onClose={closeDrawer}
+            myRole="customer"
+            otherLabel={rider?.full_name.split(' ')[0] ?? 'Captain'}
+            chatEnabled={chatEnabled}
+          />
 
           {(order.status === 'completed' || order.status === 'delivered') && (
             <div className="mt-4 border-t border-surface-border pt-4">

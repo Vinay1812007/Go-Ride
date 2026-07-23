@@ -60,6 +60,11 @@ export const rescheduleBody = z.object({
   scheduled_at: z.string().datetime(),
 });
 
+// POST /orders/:id/messages — customer or captain sends a chat line
+export const sendMessageBody = z.object({
+  body: z.string().min(1).max(1000),
+});
+
 // POST /rides/location (rider heartbeat)
 export const locationPingBody = z.object({
   lat: z.number(),
