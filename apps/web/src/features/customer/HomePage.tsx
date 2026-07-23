@@ -82,6 +82,9 @@ export default function HomePage() {
           Hi, {profile?.full_name?.split(' ')[0] ?? 'there'}
         </div>
         <div className="flex gap-2">
+          <Link to="/wallet" className="rounded-xl bg-white shadow-card px-3 py-2 text-sm font-medium">
+            💳 Wallet
+          </Link>
           <Link to="/history" className="rounded-xl bg-white shadow-card px-3 py-2 text-sm font-medium">
             History
           </Link>

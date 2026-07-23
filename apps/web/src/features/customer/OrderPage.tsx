@@ -3,6 +3,8 @@ import { useLocation, useNavigate } from 'react-router-dom';
 import MapView from '@/components/MapView';
 import VehicleSelector, { type VehicleQuote } from '@/components/VehicleSelector';
 import BottomSheet from '@/components/ui/BottomSheet';
+import PromoInput from '@/components/PromoInput';
+import { useWalletBalance } from '@/hooks/useWalletBalance';
 import { api } from '@/lib/api';
 import type { LatLng, ServiceType, QuoteResult } from '@/lib/types';
 import { inr, scheduleLabel } from '@/lib/format';
@@ -28,6 +30,12 @@ export default function OrderPage() {
   const [parcel, setParcel] = useState({ weight_kg: 2, contents: '', receiver_name: '', receiver_phone: '' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Promo + wallet ─────────────────────────────────────────────────────
+  const [promoCode, setPromoCode] = useState<string | null>(null);
+  const [promoDiscount, setPromoDiscount] = useState<number>(0);
+  const [walletApply, setWalletApply] = useState(false);
+  const { balance: walletBalance } = useWalletBalance();
 
   // ── Scheduling ─────────────────────────────────────────────────────────
   // whenMode 'now' skips the picker; 'later' opens it inline. scheduledAt is
@@ -129,6 +137,8 @@ export default function OrderPage() {
         payment_method: 'cash',
         parcel: isParcel ? parcel : undefined,
         scheduled_at: scheduledIso,
+        promo_code: promoCode ?? undefined,
+        wallet_apply: walletApply,
       });
       // Scheduled orders go to History → Upcoming; live orders go to Tracking.
       if (res.status === 'scheduled') {
@@ -215,6 +225,25 @@ export default function OrderPage() {
             </button>
           )}
 
+          {/* Promo + wallet */}
+          {selected && (
+            <div className="mt-4">
+              <PromoInput
+                service={selected}
+                pickup={state.pickup}
+                drop={state.drop}
+                city={import.meta.env.VITE_DEFAULT_CITY ?? 'Hyderabad'}
+                appliedCode={promoCode}
+                appliedDiscount={promoDiscount}
+                onApply={(c, d) => { setPromoCode(c); setPromoDiscount(d); }}
+                onClear={() => { setPromoCode(null); setPromoDiscount(0); }}
+                walletBalance={walletBalance}
+                walletApply={walletApply}
+                onWalletToggle={setWalletApply}
+              />
+            </div>
+          )}
+
           {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
 
           <button
@@ -226,10 +255,10 @@ export default function OrderPage() {
               ? 'Confirming…'
               : selected
                 ? isParcel && !parcelOpen
-                  ? `Continue · ${inr(quotes[selected]?.fare)}`
+                  ? `Continue · ${inr(Math.max(0, (quotes[selected]?.fare ?? 0) - promoDiscount))}`
                   : whenMode === 'later'
-                    ? `Schedule ride · ${inr(quotes[selected]?.fare)}`
-                    : `Confirm · ${inr(quotes[selected]?.fare)}`
+                    ? `Schedule ride · ${inr(Math.max(0, (quotes[selected]?.fare ?? 0) - promoDiscount))}`
+                    : `Confirm · ${inr(Math.max(0, (quotes[selected]?.fare ?? 0) - promoDiscount))}`
                 : 'Select a vehicle'}
           </button>
         </div>

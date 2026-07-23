@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/env';
 import { requireAuth, requireRole } from '../lib/auth';
 import { admin } from '../lib/supabase';
-import { rateCardBody, refundBody } from '../lib/schemas';
+import { rateCardBody, refundBody, promoUpsertBody, walletCreditBody } from '../lib/schemas';
 import { dispatch } from '../lib/dispatch';
 import { haversineKm } from '../lib/geo';
 import type { z } from 'zod';
@@ -592,6 +592,76 @@ adminRoute.post('/dev/purge-demo', async (c) => {
     await db.auth.admin.deleteUser(id).catch(() => {});
   }
   return c.json({ ok: true, deleted: ids.length, orders: orderIds.length });
+});
+
+// ---- Promo codes ----
+adminRoute.get('/promos', async (c) => {
+  const { data } = await admin(c.env)
+    .from('promo_codes')
+    .select('id, code, description, discount_type, discount_value, max_discount, min_order, applies_to, valid_from, valid_until, usage_limit_per_user, total_usage_limit, times_used, active, created_at')
+    .order('created_at', { ascending: false })
+    .limit(200);
+  return c.json({ promos: data ?? [] });
+});
+
+adminRoute.post('/promos', async (c) => {
+  const body = await parse(c, promoUpsertBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const payload = { ...body, code: body.code.trim().toUpperCase() };
+  const db = admin(c.env);
+  const { id, ...upsert } = payload;
+  const query = id
+    ? db.from('promo_codes').update(upsert).eq('id', id).select().single()
+    : db.from('promo_codes').insert(upsert).select().single();
+  const { data, error } = await query;
+  if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
+  return c.json({ promo: data });
+});
+
+adminRoute.delete('/promos/:id', async (c) => {
+  // Soft-delete: flip active=false so historical redemptions still resolve.
+  const { error } = await admin(c.env)
+    .from('promo_codes')
+    .update({ active: false })
+    .eq('id', c.req.param('id'));
+  if (error) return c.json({ error: { code: 'delete_failed', message: error.message } }, 500);
+  return c.json({ ok: true });
+});
+
+// ---- Wallet admin (customer-support: credit or debit) ----
+// GET /admin/wallet/:profile_id → balance + last 50 entries + profile summary
+adminRoute.get('/wallet/:id', async (c) => {
+  const db = admin(c.env);
+  const id = c.req.param('id');
+  const [{ data: profile }, { data: entries }, { data: balanceRow }] = await Promise.all([
+    db.from('profiles').select('id, full_name, email, phone, referral_code, referred_by').eq('id', id).maybeSingle(),
+    db.from('wallet_ledger')
+      .select('id, delta, reason, order_id, note, created_at')
+      .eq('profile_id', id)
+      .order('created_at', { ascending: false })
+      .limit(50),
+    db.rpc('wallet_balance', { p_profile_id: id }),
+  ]);
+  if (!profile) return c.json({ error: { code: 'not_found' } }, 404);
+  return c.json({ profile, balance: Number(balanceRow ?? 0), entries: entries ?? [] });
+});
+
+// POST /admin/wallet/:profile_id → credit or debit (delta signed)
+adminRoute.post('/wallet/:id', async (c) => {
+  const body = await parse(c, walletCreditBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const { data, error } = await admin(c.env)
+    .from('wallet_ledger')
+    .insert({
+      profile_id: c.req.param('id'),
+      delta: body.delta,
+      reason: body.reason,
+      note: body.note,
+    })
+    .select()
+    .single();
+  if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
+  return c.json({ entry: data });
 });
 
 export default adminRoute;

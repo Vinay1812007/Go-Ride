@@ -47,6 +47,9 @@ export const createOrderBody = z.object({
     })
     .optional(),
   restaurant_id: z.string().uuid().optional(),
+  // Redemptions applied at checkout. Both optional.
+  promo_code: z.string().min(2).max(30).optional(),
+  wallet_apply: z.boolean().default(false),   // if true, use up to (post-discount total) of wallet balance
   food: z
     .object({
       items: z.array(z.object({
@@ -149,5 +152,29 @@ export const rateCardBody = z.object({
 export const refundBody = z.object({
   amount: z.number().positive(),
   type: z.enum(['refund', 'adjustment']),
+  note: z.string().min(3).max(300),
+});
+
+// Admin: create/update a promo code
+export const promoUpsertBody = z.object({
+  id: z.string().uuid().optional(),
+  code: z.string().min(2).max(30),
+  description: z.string().max(200).optional(),
+  discount_type: z.enum(['percent', 'flat']),
+  discount_value: z.number().positive(),
+  max_discount: z.number().positive().nullable().optional(),
+  min_order: z.number().nonnegative().default(0),
+  applies_to: z.enum(['all', 'ride', 'parcel', 'food']).default('all'),
+  valid_from: z.string().datetime().optional(),
+  valid_until: z.string().datetime().nullable().optional(),
+  usage_limit_per_user: z.number().int().nonnegative().default(1),
+  total_usage_limit: z.number().int().positive().nullable().optional(),
+  active: z.boolean().default(true),
+});
+
+// Admin: credit/debit a user's wallet (customer support use case)
+export const walletCreditBody = z.object({
+  delta: z.number().refine((v) => v !== 0, { message: 'delta must be non-zero' }),
+  reason: z.enum(['adjustment', 'refund', 'top_up', 'promo_credit']).default('adjustment'),
   note: z.string().min(3).max(300),
 });

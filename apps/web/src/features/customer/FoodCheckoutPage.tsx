@@ -6,6 +6,8 @@ import { inr } from '@/lib/format';
 import type { LatLng } from '@/lib/types';
 import { cartSubtotal, loadCart, saveCart, addOne, removeOne, type CartSnapshot } from '@/lib/foodCart';
 import Spinner from '@/components/ui/Spinner';
+import PromoInput from '@/components/PromoInput';
+import { useWalletBalance } from '@/hooks/useWalletBalance';
 import { useToast } from '@/components/ui/Toast';
 
 export default function FoodCheckoutPage() {
@@ -18,6 +20,10 @@ export default function FoodCheckoutPage() {
   const [payment, setPayment] = useState<'cash' | 'upi'>('cash');
   const [feeQuote, setFeeQuote] = useState<{ fare: number; distance_km: number; duration_min: number } | null>(null);
   const [placing, setPlacing] = useState(false);
+  const [promoCode, setPromoCode] = useState<string | null>(null);
+  const [promoDiscount, setPromoDiscount] = useState<number>(0);
+  const [walletApply, setWalletApply] = useState(false);
+  const { balance: walletBalance } = useWalletBalance();
 
   // Grab customer's location for the drop address.
   useEffect(() => {
@@ -61,7 +67,8 @@ export default function FoodCheckoutPage() {
 
   const subtotal = cartSubtotal(cart);
   const fee = feeQuote?.fare ?? 0;
-  const total = subtotal + fee;
+  const walletApplied = walletApply ? Math.min(walletBalance, Math.max(0, subtotal + fee - promoDiscount)) : 0;
+  const total = Math.max(0, subtotal + fee - promoDiscount - walletApplied);
   const belowMin = subtotal < cart.min_order;
 
   async function placeOrder() {
@@ -86,6 +93,8 @@ export default function FoodCheckoutPage() {
           instructions: instructions.trim() || undefined,
           subtotal,
         },
+        promo_code: promoCode ?? undefined,
+        wallet_apply: walletApply,
       });
       // Cart is placed → clear it before tracking.
       saveCart(null); setCart(null);
@@ -187,6 +196,25 @@ export default function FoodCheckoutPage() {
           </div>
         </div>
 
+        {/* Promo + wallet */}
+        <div className="card">
+          <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Offers</div>
+          <PromoInput
+            service="food"
+            pickup={{ lat: cart.restaurant_lat, lng: cart.restaurant_lng }}
+            drop={drop ?? { lat: cart.restaurant_lat, lng: cart.restaurant_lng }}
+            city={import.meta.env.VITE_DEFAULT_CITY ?? 'Hyderabad'}
+            foodSubtotal={subtotal}
+            appliedCode={promoCode}
+            appliedDiscount={promoDiscount}
+            onApply={(c, d) => { setPromoCode(c); setPromoDiscount(d); }}
+            onClear={() => { setPromoCode(null); setPromoDiscount(0); }}
+            walletBalance={walletBalance}
+            walletApply={walletApply}
+            onWalletToggle={setWalletApply}
+          />
+        </div>
+
         {/* Bill summary */}
         <div className="card">
           <div className="text-xs uppercase tracking-wider text-slate-500 font-semibold mb-2">Bill</div>
@@ -196,6 +224,18 @@ export default function FoodCheckoutPage() {
               <dt>Delivery fee {feeQuote && <span className="text-xs text-slate-500">({feeQuote.distance_km.toFixed(1)} km)</span>}</dt>
               <dd>{feeQuote ? inr(fee) : <Spinner className="h-3 w-3 inline-block" />}</dd>
             </div>
+            {promoDiscount > 0 && (
+              <div className="flex justify-between text-emerald-700">
+                <dt>Promo {promoCode && <span className="font-mono text-xs">{promoCode}</span>}</dt>
+                <dd>−{inr(promoDiscount)}</dd>
+              </div>
+            )}
+            {walletApplied > 0 && (
+              <div className="flex justify-between text-emerald-700">
+                <dt>Wallet applied</dt>
+                <dd>−{inr(walletApplied)}</dd>
+              </div>
+            )}
             <div className="flex justify-between border-t border-surface-border pt-2 mt-2 font-bold">
               <dt>Total</dt><dd>{inr(total)}</dd>
             </div>

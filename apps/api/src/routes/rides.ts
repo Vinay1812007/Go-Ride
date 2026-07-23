@@ -165,7 +165,53 @@ rides.post('/:orderId/complete', requireAuth, requireRole('rider'), async (c) =>
   }
   await db.from('riders').update({ status: 'online' }).eq('id', uid);
   await broadcast(c.env, `order:${orderId}`, 'status', { status: nextStatus, fare_final: fareFinal });
+
+  // Referral bonus — if this is the customer's FIRST completed trip and they
+  // have a referred_by set, credit both parties. Amounts are tunable.
+  c.executionCtx.waitUntil(maybeCreditReferralBonus(c.env, order.customer_id, orderId).catch(() => {}));
+
   return c.json({ ok: true, status: nextStatus, fare_final: fareFinal });
 });
+
+// Referral payout constants — tune in one place.
+const REFERRER_BONUS = 100;   // ₹ credited to the person who shared their code
+const REFEREE_BONUS  =  50;   // ₹ credited to the new customer
+
+async function maybeCreditReferralBonus(env: any, customerId: string, orderId: string) {
+  const db = admin(env);
+  const { data: profile } = await db
+    .from('profiles')
+    .select('referred_by')
+    .eq('id', customerId)
+    .maybeSingle();
+  if (!profile?.referred_by) return;
+
+  // Guard: has this customer already been credited a referral bonus? We
+  // check by looking for an existing referee-bonus ledger row for them.
+  const { data: existing } = await db
+    .from('wallet_ledger')
+    .select('id')
+    .eq('profile_id', customerId)
+    .eq('reason', 'referral_bonus_referee')
+    .limit(1);
+  if (existing && existing.length > 0) return;
+
+  await db.from('wallet_ledger').insert([
+    {
+      profile_id: profile.referred_by,
+      delta: REFERRER_BONUS,
+      reason: 'referral_bonus_referrer',
+      order_id: orderId,
+      note: `Bonus for referring a friend (first trip)`,
+    },
+    {
+      profile_id: customerId,
+      delta: REFEREE_BONUS,
+      reason: 'referral_bonus_referee',
+      order_id: orderId,
+      note: `Welcome bonus — first trip complete`,
+    },
+  ]);
+}
 
 export default rides;

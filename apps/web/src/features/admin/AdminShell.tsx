@@ -11,6 +11,7 @@ import RateCardsPage from './RateCardsPage';
 import LiveMapPage from './LiveMapPage';
 import ReportsPage from './ReportsPage';
 import PartnersPage from './PartnersPage';
+import PromosPage from './PromosPage';
 
 interface Stats { online_riders: number; active_orders: number; revenue_today: number }
 
@@ -108,6 +109,7 @@ export default function AdminShell() {
     { to: '/admin/orders',     label: 'Orders' },
     { to: '/admin/riders',     label: 'Riders' },
     { to: '/admin/rate-cards', label: 'Rate cards' },
+    { to: '/admin/promos',     label: 'Promos' },
     { to: '/admin/reports',    label: 'Reports' },
     { to: '/admin/partners',   label: 'Partners' },
   ];
@@ -133,6 +135,7 @@ export default function AdminShell() {
           <Route path="" element={<Dashboard />} />
           <Route path="live-map" element={<LiveMapPage />} />
           <Route path="rate-cards" element={<RateCardsPage />} />
+          <Route path="promos" element={<PromosPage />} />
           <Route path="riders" element={<RidersPage />} />
           <Route path="orders" element={<OrdersPage />} />
           <Route path="reports" element={<ReportsPage />} />

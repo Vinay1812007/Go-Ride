@@ -9,6 +9,7 @@ import PublicTrackPage from './features/customer/PublicTrackPage';
 import FoodBrowsePage from './features/customer/FoodBrowsePage';
 import RestaurantPage from './features/customer/RestaurantPage';
 import FoodCheckoutPage from './features/customer/FoodCheckoutPage';
+import WalletPage from './features/customer/WalletPage';
 import CaptainShell from './features/rider/CaptainShell';
 import AdminShell from './features/admin/AdminShell';
 import DevelopersPage from './features/developers/DevelopersPage';
@@ -107,6 +108,7 @@ export default function App() {
         <Route path="/food" element={<FoodBrowsePage />} />
         <Route path="/food/checkout" element={<FoodCheckoutPage />} />
         <Route path="/food/:restaurantId" element={<RestaurantPage />} />
+        <Route path="/wallet" element={<WalletPage />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     );
@@ -163,6 +165,7 @@ export default function App() {
       <Route path="/food" element={<FoodBrowsePage />} />
       <Route path="/food/checkout" element={<FoodCheckoutPage />} />
       <Route path="/food/:restaurantId" element={<RestaurantPage />} />
+      <Route path="/wallet" element={<WalletPage />} />
       <Route path="/captain/*" element={<CaptainShell />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

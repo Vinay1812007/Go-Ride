@@ -20,6 +20,13 @@ function validateScheduleWindow(iso: string): string | null {
   return null;
 }
 import { shareToken } from '../lib/hmac';
+import {
+  countUserRedemptions,
+  evaluatePromo,
+  fetchPromo,
+  promoErrorMessage,
+  walletBalance,
+} from '../lib/promos';
 import type { z } from 'zod';
 
 const orders = new Hono<AppEnv>();
@@ -102,12 +109,45 @@ orders.post('/', requireAuth, requireRole('customer'), async (c) => {
   // For food orders, fare_estimate = delivery fee + food subtotal, and the
   // breakup gets an extra `food_subtotal` field so the customer sees the
   // split at checkout.
-  const finalFareEstimate = body.service === 'food'
+  const baseFareEstimate = body.service === 'food'
     ? Number(breakup.total) + foodSubtotal
     : Number(breakup.total);
-  const finalBreakup = body.service === 'food'
+
+  // ── Promo code ─────────────────────────────────────────────────────────
+  // If code is provided, revalidate here (client dry-run may be stale) and
+  // record the redemption right after the insert.
+  const uid = c.get('userId')!;
+  let promoRow: Awaited<ReturnType<typeof fetchPromo>> = null;
+  let discount = 0;
+  if (body.promo_code) {
+    promoRow = await fetchPromo(c.env, body.promo_code);
+    const eligible = body.service === 'food' ? foodSubtotal : Number(breakup.total);
+    const used = promoRow ? await countUserRedemptions(c.env, promoRow.id, uid) : 0;
+    const verdict = evaluatePromo(promoRow, { service: body.service, eligible_amount: eligible }, used);
+    if (!verdict.ok) {
+      return c.json({ error: { code: verdict.code, message: promoErrorMessage(verdict.code) } }, 400);
+    }
+    discount = verdict.discount;
+  }
+
+  // ── Wallet apply ───────────────────────────────────────────────────────
+  // Consume up to the post-discount total. Any remainder rides on the
+  // customer's chosen payment_method.
+  let walletUsed = 0;
+  if (body.wallet_apply) {
+    const bal = await walletBalance(c.env, uid);
+    const payable = Math.max(0, baseFareEstimate - discount);
+    walletUsed = Math.min(Math.max(0, bal), payable);
+    walletUsed = Math.round(walletUsed * 100) / 100;
+  }
+
+  const finalFareEstimate = Math.max(0, baseFareEstimate - discount - walletUsed);
+  const finalBreakup: Record<string, unknown> = body.service === 'food'
     ? { ...breakup, food_subtotal: foodSubtotal, delivery_fee: breakup.total }
-    : breakup;
+    : { ...breakup };
+  if (discount)   finalBreakup.discount    = discount;
+  if (walletUsed) finalBreakup.wallet_used = walletUsed;
+  finalBreakup.total = finalFareEstimate;
 
   const { data: inserted, error } = await db
     .from('orders')
@@ -137,10 +177,44 @@ orders.post('/', requireAuth, requireRole('customer'), async (c) => {
         ? { items: body.food.items, instructions: body.food.instructions ?? null, subtotal: foodSubtotal }
         : null,
       share_token: token,
+      promo_id: promoRow?.id ?? null,
+      discount,
+      wallet_used: walletUsed,
     })
     .select('id, order_no, otp, share_token, scheduled_at, status')
     .single();
   if (error || !inserted) return c.json({ error: { code: 'insert_failed', message: error?.message } }, 500);
+
+  // ── Post-insert side effects: record redemption + debit wallet ─────────
+  // These are fire-and-forget so a slow write doesn't stall the response.
+  // If any of them fails we've already got the order — a nightly job could
+  // reconcile, but at MVP scale the failure rate here is effectively zero.
+  const sideEffects: Promise<unknown>[] = [];
+  if (promoRow && discount > 0) {
+    sideEffects.push(
+      Promise.resolve(db.from('promo_redemptions').insert({
+        promo_id: promoRow.id,
+        order_id: inserted.id,
+        customer_id: uid,
+        discount_amount: discount,
+      })),
+      Promise.resolve(db.from('promo_codes').update({ times_used: promoRow.times_used + 1 }).eq('id', promoRow.id)),
+    );
+  }
+  if (walletUsed > 0) {
+    sideEffects.push(
+      Promise.resolve(db.from('wallet_ledger').insert({
+        profile_id: uid,
+        delta: -walletUsed,
+        reason: 'trip_debit',
+        order_id: inserted.id,
+        note: `Applied to ${inserted.order_no}`,
+      })),
+    );
+  }
+  if (sideEffects.length > 0) {
+    c.executionCtx.waitUntil(Promise.allSettled(sideEffects).then(() => {}));
+  }
 
   // Only kick off dispatch immediately for now-orders. Scheduled orders wait
   // for the minutely cron to promote them.

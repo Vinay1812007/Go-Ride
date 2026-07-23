@@ -621,11 +621,63 @@ insert into menu_items (restaurant_id, name, price, category, is_veg, sort_order
 
 ---
 
-## 17. Phase 2 (not built yet)
+## 17. Promo codes + wallet + referrals
 
-- Promo codes / referral bonuses.
+Three things landed together — they share the same ledger table:
+
+### Promo codes
+- **Customer:** at any checkout screen (rides/parcels/food), a code input
+  appears. Applied codes show a green "Promo applied" pill with the
+  discount and a Remove affordance.
+- **Types:** `flat` (₹ off) or `percent` (with optional `max_discount` cap).
+- **Guards:** `min_order`, `applies_to` scope (all/ride/parcel/food),
+  `usage_limit_per_user`, `total_usage_limit`, `valid_from`/`valid_until`
+  window, and active flag. The API revalidates at order-create time — the
+  client's dry-run via `POST /promo/validate` is not trusted.
+- **Admin:** `/admin/promos` — table with create/edit modal, toggle
+  Active/Inactive, soft-delete (flips `active=false` so historical
+  redemptions still resolve).
+- **Seed:** WELCOME50, GRSPICE100, RIDE20, SEND40, GORIDE10 — enough for
+  demos out of the box.
+
+### Wallet
+- **Customer:** new `/wallet` page shows balance + 30-entry history +
+  refer-a-friend block with share button. Header nav has a 💳 Wallet link
+  next to History.
+- **Applying:** the "Use wallet balance" toggle shows at any checkout when
+  balance > 0. The API caps `walletUsed` at the post-discount total, so
+  wallet never leaves you with a negative order.
+- **Schema:** `wallet_ledger(profile_id, delta, reason, order_id,
+  promo_id, note, created_at)` — append-only. `wallet_balance(uuid)`
+  Postgres function sums it. Reasons: `signup_bonus`,
+  `referral_bonus_referrer/referee`, `promo_credit`, `refund`,
+  `trip_debit`, `top_up`, `adjustment`.
+- **Admin:** `GET /admin/wallet/:id` and `POST /admin/wallet/:id` for
+  customer-support credits/debits (not yet a page — call via curl for now).
+
+### Referrals
+- Every new profile auto-gets a 6-char `referral_code` (`gen_referral_code`
+  Postgres function). Backfilled for existing profiles via the migration.
+- **Applying:** a new customer can enter a friend's code on the /wallet
+  page before their first completed trip. Enforced server-side —
+  `POST /wallet/apply-referral` returns `has_orders` (409) if they've
+  already completed a trip.
+- **Payout:** on the customer's first `completed`/`delivered` order,
+  `maybeCreditReferralBonus` fires. Amounts (`REFERRER_BONUS=100`,
+  `REFEREE_BONUS=50`) are constants at the top of `apps/api/src/routes/rides.ts`.
+- **Guard:** ledger lookup on `reason='referral_bonus_referee'` prevents
+  double-crediting if a customer somehow completes two "first trips".
+
+Schema is in `supabase/migrations/0007_promos_wallet.sql` — apply via
+**Actions → Apply Supabase migrations → target: promos-wallet** (or `all`).
+
+---
+
+## 18. Phase 2 (not built yet)
+
 - Self-hosted OSRM on Fly.io free tier.
 - Push notifications (Capacitor + FCM).
 - Admin CRUD for restaurants + menu items (for now, use SQL — §16).
+- Admin wallet-credit page (endpoints exist — §17).
 
 None of these require schema migration beyond adding a column or two.
