@@ -6,6 +6,7 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 import './index.css';
 import App from './App';
 import { ToastProvider } from './components/ui/Toast';
+import InstallPrompt from './components/InstallPrompt';
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -19,6 +20,7 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
       <BrowserRouter>
         <ToastProvider>
           <App />
+          <InstallPrompt />
         </ToastProvider>
       </BrowserRouter>
     </QueryClientProvider>
