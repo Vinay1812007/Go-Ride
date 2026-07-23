@@ -80,6 +80,160 @@ adminRoute.get('/orders', async (c) => {
   return c.json({ orders: data ?? [] });
 });
 
+// ---- CSV exports ----
+// Escape a value for CSV (RFC 4180): wrap in quotes if it contains comma,
+// newline, or a double quote; double any embedded double quotes.
+function csvCell(v: unknown): string {
+  if (v == null) return '';
+  const s = String(v);
+  if (/[",\n\r]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+  return s;
+}
+function csv(rows: Array<Record<string, unknown>>, columns: string[]): string {
+  const header = columns.map(csvCell).join(',');
+  const body = rows.map((r) => columns.map((c) => csvCell(r[c])).join(',')).join('\n');
+  return header + '\n' + body + '\n';
+}
+function csvResponse(body: string, filename: string): Response {
+  return new Response(body, {
+    headers: {
+      'Content-Type': 'text/csv; charset=utf-8',
+      'Content-Disposition': `attachment; filename="${filename}"`,
+      'Cache-Control': 'no-store',
+    },
+  });
+}
+
+// GET /admin/exports/orders.csv?status=&from=&to=  → all matching orders,
+// flattened, ready for Excel / Google Sheets.
+adminRoute.get('/exports/orders.csv', async (c) => {
+  const status = c.req.query('status');
+  const from = c.req.query('from');
+  const to = c.req.query('to');
+  let q = admin(c.env)
+    .from('orders')
+    .select('order_no, service, status, city, pickup_address, drop_address, distance_km, duration_min, fare_estimate, fare_final, fare_breakup, payment_method, payment_status, customer_id, rider_id, cancelled_reason, created_at, accepted_at, picked_at, completed_at, cancelled_at')
+    .order('created_at', { ascending: false })
+    .limit(10_000);
+  if (status) q = q.eq('status', status);
+  if (from)   q = q.gte('created_at', from);
+  if (to)     q = q.lte('created_at', to);
+  const { data, error } = await q;
+  if (error) return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+
+  const flat = (data ?? []).map((o) => ({
+    ...o,
+    commission: (o.fare_breakup as { commission?: number } | null)?.commission ?? '',
+    rider_earning: (o.fare_breakup as { rider_earning?: number } | null)?.rider_earning ?? '',
+    fare_breakup: undefined,
+  }));
+  const columns = [
+    'order_no', 'service', 'status', 'city',
+    'pickup_address', 'drop_address',
+    'distance_km', 'duration_min',
+    'fare_estimate', 'fare_final', 'commission', 'rider_earning',
+    'payment_method', 'payment_status',
+    'customer_id', 'rider_id',
+    'cancelled_reason',
+    'created_at', 'accepted_at', 'picked_at', 'completed_at', 'cancelled_at',
+  ];
+  return csvResponse(csv(flat, columns), `goride-orders-${new Date().toISOString().slice(0, 10)}.csv`);
+});
+
+// GET /admin/exports/daily-revenue.csv?from=&to=  → per-day aggregate for
+// completed orders — orders count, gross revenue, platform commission,
+// rider payouts.
+adminRoute.get('/exports/daily-revenue.csv', async (c) => {
+  const from = c.req.query('from') ?? new Date(Date.now() - 30 * 86400_000).toISOString().slice(0, 10);
+  const to = c.req.query('to');
+  let q = admin(c.env)
+    .from('orders')
+    .select('completed_at, fare_final, fare_breakup, service, city')
+    .in('status', ['completed', 'delivered'])
+    .gte('completed_at', from)
+    .order('completed_at', { ascending: true })
+    .limit(20_000);
+  if (to) q = q.lte('completed_at', to);
+  const { data, error } = await q;
+  if (error) return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+
+  const byDay = new Map<string, { orders: number; revenue: number; commission: number; rider_earning: number }>();
+  for (const o of data ?? []) {
+    const day = String(o.completed_at).slice(0, 10);
+    const bucket = byDay.get(day) ?? { orders: 0, revenue: 0, commission: 0, rider_earning: 0 };
+    bucket.orders += 1;
+    bucket.revenue += Number(o.fare_final ?? 0);
+    const br = o.fare_breakup as { commission?: number; rider_earning?: number } | null;
+    bucket.commission += Number(br?.commission ?? 0);
+    bucket.rider_earning += Number(br?.rider_earning ?? 0);
+    byDay.set(day, bucket);
+  }
+  const rows = [...byDay.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([day, b]) => ({
+      day,
+      orders: b.orders,
+      revenue: b.revenue.toFixed(2),
+      commission: b.commission.toFixed(2),
+      rider_earning: b.rider_earning.toFixed(2),
+    }));
+  return csvResponse(
+    csv(rows, ['day', 'orders', 'revenue', 'commission', 'rider_earning']),
+    `goride-daily-revenue-${new Date().toISOString().slice(0, 10)}.csv`,
+  );
+});
+
+// GET /admin/exports/rider-earnings.csv?from=&to=  → per-rider totals.
+adminRoute.get('/exports/rider-earnings.csv', async (c) => {
+  const from = c.req.query('from') ?? new Date(Date.now() - 30 * 86400_000).toISOString();
+  const to = c.req.query('to');
+  const db = admin(c.env);
+  let q = db
+    .from('transactions')
+    .select('rider_id, type, amount, created_at')
+    .in('type', ['trip_earning', 'commission', 'refund', 'adjustment'])
+    .gte('created_at', from)
+    .limit(50_000);
+  if (to) q = q.lte('created_at', to);
+  const { data: tx, error } = await q;
+  if (error) return c.json({ error: { code: 'query_failed', message: error.message } }, 500);
+
+  const byRider = new Map<string, { earning: number; commission: number; other: number; trips: number }>();
+  for (const t of tx ?? []) {
+    if (!t.rider_id) continue;
+    const b = byRider.get(t.rider_id) ?? { earning: 0, commission: 0, other: 0, trips: 0 };
+    const amt = Number(t.amount);
+    if (t.type === 'trip_earning') { b.earning += amt; b.trips += 1; }
+    else if (t.type === 'commission') b.commission += amt;
+    else b.other += amt;
+    byRider.set(t.rider_id, b);
+  }
+
+  // Enrich with names
+  const riderIds = [...byRider.keys()];
+  const { data: profiles } = riderIds.length > 0
+    ? await db.from('profiles').select('id, full_name, email').in('id', riderIds)
+    : { data: [] as Array<{ id: string; full_name: string; email: string | null }> };
+  const nameById = new Map((profiles ?? []).map((p) => [p.id, { name: p.full_name, email: p.email ?? '' }]));
+
+  const rows = [...byRider.entries()]
+    .map(([id, b]) => ({
+      rider_id: id,
+      name: nameById.get(id)?.name ?? '',
+      email: nameById.get(id)?.email ?? '',
+      trips: b.trips,
+      earning: b.earning.toFixed(2),
+      commission_paid: (-b.commission).toFixed(2),      // stored negative
+      adjustments: b.other.toFixed(2),
+      net_payout: (b.earning + b.other + b.commission).toFixed(2),
+    }))
+    .sort((a, b) => Number(b.net_payout) - Number(a.net_payout));
+  return csvResponse(
+    csv(rows, ['rider_id', 'name', 'email', 'trips', 'earning', 'commission_paid', 'adjustments', 'net_payout']),
+    `goride-rider-earnings-${new Date().toISOString().slice(0, 10)}.csv`,
+  );
+});
+
 // ---- Force re-dispatch a stuck order ----
 adminRoute.post('/orders/:id/redispatch', async (c) => {
   const orderId = c.req.param('id');

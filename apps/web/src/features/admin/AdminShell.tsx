@@ -7,6 +7,7 @@ import RidersPage from './RidersPage';
 import OrdersPage from './OrdersPage';
 import RateCardsPage from './RateCardsPage';
 import LiveMapPage from './LiveMapPage';
+import ReportsPage from './ReportsPage';
 
 interface Stats { online_riders: number; active_orders: number; revenue_today: number }
 
@@ -39,6 +40,7 @@ export default function AdminShell() {
     { to: '/admin/orders',     label: 'Orders' },
     { to: '/admin/riders',     label: 'Riders' },
     { to: '/admin/rate-cards', label: 'Rate cards' },
+    { to: '/admin/reports',    label: 'Reports' },
     { to: '/admin/partners',   label: 'Partners' },
   ];
   return (
@@ -65,6 +67,7 @@ export default function AdminShell() {
           <Route path="rate-cards" element={<RateCardsPage />} />
           <Route path="riders" element={<RidersPage />} />
           <Route path="orders" element={<OrdersPage />} />
+          <Route path="reports" element={<ReportsPage />} />
           <Route path="*" element={<div className="p-4 text-slate-500">Coming in Day 3.</div>} />
         </Routes>
       </main>
