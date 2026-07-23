@@ -608,15 +608,23 @@ same captain-driven dispatch and tracking flow as every other vertical.
 Schema is in `supabase/migrations/0006_food.sql` — apply via
 **Actions → Apply Supabase migrations → target: food** (or `all`).
 
-### Adding a restaurant (for now, before the admin CRUD lands)
+### Adding a restaurant
+
+Admin → **Restaurants** → **+ New restaurant**. Fill in name, cuisine,
+address, lat/lng (Hyderabad default 17.3850, 78.4867 as starting point),
+optional image URL and phone, min-order and avg-prep-min. Save.
+
+Then tap **Menu →** on the card to open the menu editor and add items —
+per-item veg/non-veg, category (with autocomplete from the standard list),
+sort order, availability toggle, and hard-delete. Menu items don't have
+downstream FKs (order `food_details` is a JSON snapshot captured at order
+time), so a hard delete is safe.
+
+If you still want to seed via SQL, the shape is:
 
 ```sql
 insert into restaurants (name, cuisine, address, city, lat, lng, phone, avg_prep_min, min_order, rating)
 values ('Beijing Bites', 'Chinese', 'Jubilee Hills Road No. 36', 'Hyderabad', 17.4315, 78.4090, '+911140000006', 20, 150, 4.3);
-
-insert into menu_items (restaurant_id, name, price, category, is_veg, sort_order) values
-  ((select id from restaurants where name = 'Beijing Bites'), 'Veg Manchurian', 220, 'Starters', true, 1),
-  ((select id from restaurants where name = 'Beijing Bites'), 'Chicken Fried Rice', 260, 'Rice', false, 2);
 ```
 
 ---
@@ -677,7 +685,6 @@ Schema is in `supabase/migrations/0007_promos_wallet.sql` — apply via
 
 - Self-hosted OSRM on Fly.io free tier.
 - Push notifications (Capacitor + FCM).
-- Admin CRUD for restaurants + menu items (for now, use SQL — §16).
 - Admin wallet-credit page (endpoints exist — §17).
 
 None of these require schema migration beyond adding a column or two.

@@ -2,7 +2,14 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/env';
 import { requireAuth, requireRole } from '../lib/auth';
 import { admin } from '../lib/supabase';
-import { rateCardBody, refundBody, promoUpsertBody, walletCreditBody } from '../lib/schemas';
+import {
+  rateCardBody,
+  refundBody,
+  promoUpsertBody,
+  walletCreditBody,
+  restaurantUpsertBody,
+  menuItemUpsertBody,
+} from '../lib/schemas';
 import { dispatch } from '../lib/dispatch';
 import { haversineKm } from '../lib/geo';
 import type { z } from 'zod';
@@ -662,6 +669,106 @@ adminRoute.post('/wallet/:id', async (c) => {
     .single();
   if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
   return c.json({ entry: data });
+});
+
+// ---- Restaurants + menu items (food vertical CRUD) ----
+
+// GET /admin/restaurants → all restaurants (active or not) + menu item counts.
+adminRoute.get('/restaurants', async (c) => {
+  const db = admin(c.env);
+  const [{ data: restaurants }, { data: counts }] = await Promise.all([
+    db.from('restaurants')
+      .select('id, name, cuisine, description, address, city, lat, lng, phone, image_url, avg_prep_min, min_order, rating, active, created_at')
+      .order('created_at', { ascending: false })
+      .limit(500),
+    db.from('menu_items')
+      .select('restaurant_id, id, available')
+      .limit(10_000),
+  ]);
+  // Compute per-restaurant counts client-side (cheap in JS, saves a group by).
+  const totalBy = new Map<string, number>();
+  const availBy = new Map<string, number>();
+  for (const it of counts ?? []) {
+    totalBy.set(it.restaurant_id, (totalBy.get(it.restaurant_id) ?? 0) + 1);
+    if (it.available) availBy.set(it.restaurant_id, (availBy.get(it.restaurant_id) ?? 0) + 1);
+  }
+  const withCounts = (restaurants ?? []).map((r) => ({
+    ...r,
+    menu_item_count: totalBy.get(r.id) ?? 0,
+    menu_item_available: availBy.get(r.id) ?? 0,
+  }));
+  return c.json({ restaurants: withCounts });
+});
+
+adminRoute.post('/restaurants', async (c) => {
+  const body = await parse(c, restaurantUpsertBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const db = admin(c.env);
+  const { id, ...upsert } = body;
+  const query = id
+    ? db.from('restaurants').update(upsert).eq('id', id).select().single()
+    : db.from('restaurants').insert(upsert).select().single();
+  const { data, error } = await query;
+  if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
+  return c.json({ restaurant: data });
+});
+
+adminRoute.delete('/restaurants/:id', async (c) => {
+  // Soft-delete: flip active=false so existing food orders still resolve.
+  const { error } = await admin(c.env)
+    .from('restaurants')
+    .update({ active: false })
+    .eq('id', c.req.param('id'));
+  if (error) return c.json({ error: { code: 'delete_failed', message: error.message } }, 500);
+  return c.json({ ok: true });
+});
+
+// GET /admin/restaurants/:id/menu → all items (including unavailable) grouped
+// by category. Distinct from the public GET /food/restaurants/:id which
+// only returns available items.
+adminRoute.get('/restaurants/:id/menu', async (c) => {
+  const db = admin(c.env);
+  const rid = c.req.param('id');
+  const [{ data: restaurant }, { data: items }] = await Promise.all([
+    db.from('restaurants').select('*').eq('id', rid).maybeSingle(),
+    db.from('menu_items')
+      .select('id, restaurant_id, name, description, price, category, image_url, is_veg, available, sort_order, created_at')
+      .eq('restaurant_id', rid)
+      .order('category', { ascending: true })
+      .order('sort_order', { ascending: true }),
+  ]);
+  if (!restaurant) return c.json({ error: { code: 'not_found' } }, 404);
+  return c.json({ restaurant, items: items ?? [] });
+});
+
+// POST /admin/restaurants/:id/menu → upsert an item (id present = update).
+adminRoute.post('/restaurants/:id/menu', async (c) => {
+  const body = await parse(c, menuItemUpsertBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  if (body.restaurant_id !== c.req.param('id')) {
+    return c.json({ error: { code: 'restaurant_mismatch' } }, 400);
+  }
+  const db = admin(c.env);
+  const { id, ...upsert } = body;
+  const query = id
+    ? db.from('menu_items').update(upsert).eq('id', id).select().single()
+    : db.from('menu_items').insert(upsert).select().single();
+  const { data, error } = await query;
+  if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
+  return c.json({ item: data });
+});
+
+// DELETE /admin/restaurants/:id/menu/:itemId → hard delete a menu item.
+// Menu items don't have downstream FKs (order food_details is a JSON snapshot
+// that captures name + price at order time), so a hard delete is safe.
+adminRoute.delete('/restaurants/:id/menu/:itemId', async (c) => {
+  const { error } = await admin(c.env)
+    .from('menu_items')
+    .delete()
+    .eq('id', c.req.param('itemId'))
+    .eq('restaurant_id', c.req.param('id'));
+  if (error) return c.json({ error: { code: 'delete_failed', message: error.message } }, 500);
+  return c.json({ ok: true });
 });
 
 export default adminRoute;

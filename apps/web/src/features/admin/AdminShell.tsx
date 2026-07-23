@@ -12,6 +12,7 @@ import LiveMapPage from './LiveMapPage';
 import ReportsPage from './ReportsPage';
 import PartnersPage from './PartnersPage';
 import PromosPage from './PromosPage';
+import RestaurantsPage from './RestaurantsPage';
 
 interface Stats { online_riders: number; active_orders: number; revenue_today: number }
 
@@ -108,10 +109,11 @@ export default function AdminShell() {
     { to: '/admin/live-map',   label: 'Live map' },
     { to: '/admin/orders',     label: 'Orders' },
     { to: '/admin/riders',     label: 'Riders' },
-    { to: '/admin/rate-cards', label: 'Rate cards' },
-    { to: '/admin/promos',     label: 'Promos' },
-    { to: '/admin/reports',    label: 'Reports' },
-    { to: '/admin/partners',   label: 'Partners' },
+    { to: '/admin/rate-cards',  label: 'Rate cards' },
+    { to: '/admin/promos',      label: 'Promos' },
+    { to: '/admin/restaurants', label: 'Restaurants' },
+    { to: '/admin/reports',     label: 'Reports' },
+    { to: '/admin/partners',    label: 'Partners' },
   ];
   return (
     <div className="h-full flex">
@@ -136,6 +138,7 @@ export default function AdminShell() {
           <Route path="live-map" element={<LiveMapPage />} />
           <Route path="rate-cards" element={<RateCardsPage />} />
           <Route path="promos" element={<PromosPage />} />
+          <Route path="restaurants" element={<RestaurantsPage />} />
           <Route path="riders" element={<RidersPage />} />
           <Route path="orders" element={<OrdersPage />} />
           <Route path="reports" element={<ReportsPage />} />

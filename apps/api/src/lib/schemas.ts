@@ -178,3 +178,35 @@ export const walletCreditBody = z.object({
   reason: z.enum(['adjustment', 'refund', 'top_up', 'promo_credit']).default('adjustment'),
   note: z.string().min(3).max(300),
 });
+
+// Admin: upsert a restaurant
+export const restaurantUpsertBody = z.object({
+  id: z.string().uuid().optional(),
+  name: z.string().min(2).max(100),
+  cuisine: z.string().min(2).max(60),
+  description: z.string().max(500).nullable().optional(),
+  address: z.string().min(3).max(300),
+  city: z.string().min(2).max(60).default('Hyderabad'),
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  phone: z.string().max(20).nullable().optional(),
+  image_url: z.string().url().max(500).nullable().optional(),
+  avg_prep_min: z.number().int().positive().max(180).default(20),
+  min_order: z.number().nonnegative().default(100),
+  rating: z.number().min(0).max(5).nullable().optional(),
+  active: z.boolean().default(true),
+});
+
+// Admin: upsert a menu item
+export const menuItemUpsertBody = z.object({
+  id: z.string().uuid().optional(),
+  restaurant_id: z.string().uuid(),
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).nullable().optional(),
+  price: z.number().nonnegative(),
+  category: z.string().min(1).max(40).default('Mains'),
+  image_url: z.string().url().max(500).nullable().optional(),
+  is_veg: z.boolean().default(true),
+  available: z.boolean().default(true),
+  sort_order: z.number().int().nonnegative().default(0),
+});
