@@ -777,10 +777,106 @@ certificate — not built yet.
 
 ---
 
-## 19. Phase 2 (not built yet)
+## 19. Admin wallet & credits
 
-- Self-hosted OSRM on Fly.io free tier.
-- Admin wallet-credit page (endpoints exist — §17).
+Support UI at **Admin → Wallet & credits** (`/admin/wallet`) for finding
+a customer and adjusting their wallet.
+
+- **Search:** type any of email / phone / name (min 2 chars). Debounced
+  300 ms. Returns the top 20 matches with current balance inline. Backend
+  endpoint: `GET /admin/profiles/search?q=…`.
+- **Detail pane:** shows profile summary (name / email / phone / role /
+  referral code / referred_by), current balance in the yellow hero, and
+  the last 50 ledger entries with reason + note + timestamp.
+- **Adjust form:** **+ Credit / − Debit** toggle, amount input, reason
+  dropdown (adjustment / refund / top-up / promo credit), required audit
+  note (min 3 chars). The note surfaces to the customer's own /wallet
+  history — write it in the second person ("Sorry about your delayed
+  ride on the 12th").
+- **Guard:** the form warns "Will go negative" if a debit exceeds the
+  balance, but doesn't block — a support agent occasionally needs to.
+  Ledger arithmetic handles negative balances correctly (sum(delta)).
+
+The endpoints `GET /admin/wallet/:id` and `POST /admin/wallet/:id`
+already existed from §17 — this section adds the frontend.
+
+---
+
+## 20. Self-hosted OSRM (Fly.io)
+
+The public OSRM demo at `router.project-osrm.org` has no SLA and 502s
+under load. For production, run your own OSRM on Fly.io.
+
+Everything you need is in `infra/osrm/`:
+
+- **Dockerfile** — multi-stage. Builder downloads the Telangana OSM
+  extract from Geofabrik and runs osrm-extract / osrm-partition /
+  osrm-customize; runtime is just osrm-routed with the preprocessed
+  files baked in.
+- **fly.toml** — 1× shared-cpu-1x with 1 GB RAM in `bom` (Mumbai).
+  Auto-stops when idle. Change `min_machines_running = 1` for a
+  warm-always-on setup.
+- **README** — deploy in 5 commands, verification curl, notes on
+  region swap (Karnataka / Maharashtra / all-India) and cost.
+
+### Deploy in 5 commands
+
+```bash
+cd infra/osrm
+fly auth login
+fly launch --no-deploy --name goride-osrm --region bom --copy-config
+fly deploy   # ~15 min first time (downloads PBF + preprocesses)
+fly status   # shows https://goride-osrm.fly.dev
+```
+
+### Wire it into the Worker
+
+Edit `apps/api/wrangler.toml`:
+
+```toml
+[vars]
+OSRM_URL = "https://goride-osrm.fly.dev"
+ROUTER   = "osrm"
+```
+
+Push, GH Actions redeploys the Worker. Verify with:
+
+```bash
+curl "https://goride-osrm.fly.dev/route/v1/driving/78.4867,17.3850;78.4291,17.2403?overview=false" | jq .code
+# → "Ok"
+```
+
+### Cost
+
+Fly dropped the free-forever tier in Nov 2024. Expect **~$3-4/mo** for a
+shared-cpu-1x + 1 GB RAM in a single region. If cost is an issue, use
+OpenRouteService (below).
+
+### Zero-infra alternative — OpenRouteService
+
+OpenRouteService offers 2000 requests/day free with no infra to manage.
+Sign up at https://openrouteservice.org/dev/#/signup → get the key →
+add to GH secrets as `ORS_KEY` → set `ROUTER = "ors"` in
+`apps/api/wrangler.toml` → push. The Worker already knows how to route
+via ORS when it sees the key.
+
+### Refreshing map data
+
+OSM changes daily. Redeploy monthly:
+
+```bash
+fly deploy --no-cache
+```
+
+For automation, add a monthly GH Actions cron that runs
+`flyctl deploy --no-cache` — needs a `FLY_API_TOKEN` GH secret from
+`fly tokens create deploy`.
+
+---
+
+## 21. Phase 2 (not built yet)
+
 - Code-splitting for the web bundle (~540 kB main chunk → could halve).
 
-None of these require schema migration beyond adding a column or two.
+Nothing else on the roadmap I've been tracking. Say what you want to
+tackle next.

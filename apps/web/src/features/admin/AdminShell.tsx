@@ -13,6 +13,7 @@ import ReportsPage from './ReportsPage';
 import PartnersPage from './PartnersPage';
 import PromosPage from './PromosPage';
 import RestaurantsPage from './RestaurantsPage';
+import WalletAdminPage from './WalletAdminPage';
 
 interface Stats { online_riders: number; active_orders: number; revenue_today: number }
 
@@ -112,6 +113,7 @@ export default function AdminShell() {
     { to: '/admin/rate-cards',  label: 'Rate cards' },
     { to: '/admin/promos',      label: 'Promos' },
     { to: '/admin/restaurants', label: 'Restaurants' },
+    { to: '/admin/wallet',      label: 'Wallet & credits' },
     { to: '/admin/reports',     label: 'Reports' },
     { to: '/admin/partners',    label: 'Partners' },
   ];
@@ -139,6 +141,7 @@ export default function AdminShell() {
           <Route path="rate-cards" element={<RateCardsPage />} />
           <Route path="promos" element={<PromosPage />} />
           <Route path="restaurants" element={<RestaurantsPage />} />
+          <Route path="wallet" element={<WalletAdminPage />} />
           <Route path="riders" element={<RidersPage />} />
           <Route path="orders" element={<OrdersPage />} />
           <Route path="reports" element={<ReportsPage />} />

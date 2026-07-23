@@ -1,0 +1,59 @@
+# Fly.io config for goride-osrm.
+#
+# Deploy: `cd infra/osrm && fly launch --no-deploy` (creates the app), edit
+# this file if needed, then `fly deploy`. First deploy takes ~15 minutes as
+# it downloads the Telangana PBF and runs the OSRM pipeline inside the
+# builder stage. Subsequent deploys are cache-hit fast.
+#
+# ── Cost note ────────────────────────────────────────────────────────────
+# Fly no longer offers a free-forever tier as of Nov 2024. Expect ~$3-4/mo
+# for a shared-cpu-1x with 1 GB RAM in a single region. Add a payment
+# method during `fly launch`. If cost is an issue, use OpenRouteService's
+# free API (2000/day) — set ROUTER=ors + ORS_KEY on the Worker instead.
+
+app = "goride-osrm"
+primary_region = "bom"   # Mumbai — closest to India traffic
+
+[build]
+  dockerfile = "Dockerfile"
+
+[[services]]
+  internal_port = 5000
+  protocol = "tcp"
+  auto_stop_machines = "stop"       # Stops the machine when idle
+  auto_start_machines = true        # Starts on first request (~2s cold start)
+  min_machines_running = 0
+  # Under real customer load, bump this to 1 so cold-start latency doesn't hit
+  # the first ride of the day.
+
+  [[services.ports]]
+    port = 443
+    handlers = ["tls", "http"]
+    force_https = true
+
+  [[services.ports]]
+    port = 80
+    handlers = ["http"]
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+  # Explicit health check so Fly kills a wedged instance rather than serving
+  # 502s. OSRM's /nearest endpoint is the cheapest one to hit.
+  [[services.tcp_checks]]
+    interval = "15s"
+    timeout = "2s"
+
+[[vm]]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 1024
+
+# Optional persistent volume for the .osrm files. Not strictly needed since
+# they're baked into the image; useful if you're preprocessing a bigger
+# region in CI and mounting rather than rebuilding.
+# [[mounts]]
+#   source = "osrm_data"
+#   destination = "/data"

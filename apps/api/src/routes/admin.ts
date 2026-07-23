@@ -671,6 +671,31 @@ adminRoute.post('/wallet/:id', async (c) => {
   return c.json({ entry: data });
 });
 
+// ---- Customer lookup for wallet admin (search by email / phone / name) ----
+// Small tool for customer-support: type any of email / phone / name, get the
+// top 20 matches with their current wallet balance.
+adminRoute.get('/profiles/search', async (c) => {
+  const q = (c.req.query('q') ?? '').trim();
+  if (q.length < 2) return c.json({ profiles: [] });
+  const db = admin(c.env);
+  // ilike on three columns via OR filter. Supabase's PostgREST or() takes
+  // comma-separated conditions.
+  const like = `%${q.replace(/[%,]/g, '')}%`;
+  const { data: profiles } = await db
+    .from('profiles')
+    .select('id, full_name, email, phone, role, referral_code, referred_by, created_at, blocked')
+    .or(`full_name.ilike.${like},email.ilike.${like},phone.ilike.${like}`)
+    .limit(20);
+  if (!profiles || profiles.length === 0) return c.json({ profiles: [] });
+
+  // Batch-fetch balances via one RPC per row (cheap at 20 max).
+  const withBalance = await Promise.all(profiles.map(async (p) => {
+    const { data: bal } = await db.rpc('wallet_balance', { p_profile_id: p.id });
+    return { ...p, balance: Number(bal ?? 0) };
+  }));
+  return c.json({ profiles: withBalance });
+});
+
 // ---- Restaurants + menu items (food vertical CRUD) ----
 
 // GET /admin/restaurants → all restaurants (active or not) + menu item counts.
