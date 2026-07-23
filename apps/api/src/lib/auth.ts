@@ -1,21 +1,51 @@
-import { jwtVerify } from 'jose';
-import type { Context, MiddlewareHandler } from 'hono';
-import type { AppEnv } from './env';
+import { jwtVerify, createRemoteJWKSet, errors as joseErrors } from 'jose';
+import type { MiddlewareHandler } from 'hono';
+import type { AppEnv, Env } from './env';
 import { admin } from './supabase';
 
+// JWKS cache — one per Worker instance, keyed by Supabase URL. jose handles
+// its own in-memory caching (default 10 min TTL) once created.
+const jwksCache = new Map<string, ReturnType<typeof createRemoteJWKSet>>();
+
+function getJwks(env: Env) {
+  const url = `${env.SUPABASE_URL}/auth/v1/.well-known/jwks.json`;
+  let jwks = jwksCache.get(url);
+  if (!jwks) {
+    jwks = createRemoteJWKSet(new URL(url));
+    jwksCache.set(url, jwks);
+  }
+  return jwks;
+}
+
 // Verify a Supabase JWT and populate ctx.userId + ctx.userRole.
+// Supports both HS256 (legacy shared secret) and asymmetric (ES256/RS256)
+// signing keys — Supabase migrated newer projects to signing keys.
 export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
   const authz = c.req.header('Authorization');
   if (!authz?.startsWith('Bearer ')) {
     return c.json({ error: { code: 'unauthenticated', message: 'Missing bearer token' } }, 401);
   }
   const token = authz.slice(7);
-  const secret = new TextEncoder().encode(c.env.SUPABASE_JWT_SECRET);
+  const hs256Secret = new TextEncoder().encode(c.env.SUPABASE_JWT_SECRET);
+  const jwks = getJwks(c.env);
+
   let payload: Record<string, unknown>;
   try {
-    ({ payload } = await jwtVerify(token, secret, { algorithms: ['HS256'] }));
-  } catch {
-    return c.json({ error: { code: 'invalid_token', message: 'JWT verify failed' } }, 401);
+    // jose accepts a key resolver function: (protectedHeader, token) => Key
+    // HS256 tokens use the shared secret; asymmetric tokens use JWKS.
+    ({ payload } = await jwtVerify(
+      token,
+      async (protectedHeader) => {
+        if (protectedHeader.alg === 'HS256') return hs256Secret;
+        return jwks(protectedHeader);
+      },
+      { algorithms: ['HS256', 'ES256', 'RS256'] },
+    ));
+  } catch (e) {
+    const code = e instanceof joseErrors.JWTExpired ? 'token_expired'
+               : e instanceof joseErrors.JOSEError ? `invalid_token:${e.code}`
+               : 'invalid_token';
+    return c.json({ error: { code, message: e instanceof Error ? e.message : 'JWT verify failed' } }, 401);
   }
   const userId = payload.sub as string | undefined;
   if (!userId) {
