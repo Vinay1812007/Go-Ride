@@ -54,10 +54,8 @@ export default function App() {
         </>
       )}
 
-      {/* Rider */}
-      {(target === 'rider' || role === 'rider') && (
-        <Route path="/captain/*" element={<CaptainShell />} />
-      )}
+      {/* Rider — /captain/* is available to any signed-in user so a customer can onboard */}
+      <Route path="/captain/*" element={<CaptainShell />} />
       {role === 'rider' && target !== 'admin' && (
         <Route path="/" element={<Navigate to="/captain" replace />} />
       )}

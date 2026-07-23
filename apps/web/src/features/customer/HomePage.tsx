@@ -145,9 +145,14 @@ export default function HomePage() {
             </button>
           </div>
 
-          <div className="mt-6 text-xs text-slate-400 flex justify-between">
-            <span>© OpenStreetMap contributors</span>
-            <Link to="/developers" className="hover:text-slate-600">Developers →</Link>
+          <div className="mt-6 flex items-center justify-between text-xs">
+            <Link to="/captain" className="text-slate-500 hover:text-surface-strong font-medium">
+              Drive with GoRide →
+            </Link>
+            <Link to="/developers" className="text-slate-400 hover:text-slate-600">Developers →</Link>
+          </div>
+          <div className="mt-2 text-[10px] text-slate-400 text-center">
+            © OpenStreetMap contributors
           </div>
         </div>
       </div>
