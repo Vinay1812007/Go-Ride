@@ -8,6 +8,7 @@ import OrdersPage from './OrdersPage';
 import RateCardsPage from './RateCardsPage';
 import LiveMapPage from './LiveMapPage';
 import ReportsPage from './ReportsPage';
+import PartnersPage from './PartnersPage';
 
 interface Stats { online_riders: number; active_orders: number; revenue_today: number }
 
@@ -68,6 +69,7 @@ export default function AdminShell() {
           <Route path="riders" element={<RidersPage />} />
           <Route path="orders" element={<OrdersPage />} />
           <Route path="reports" element={<ReportsPage />} />
+          <Route path="partners" element={<PartnersPage />} />
           <Route path="*" element={<div className="p-4 text-slate-500">Coming in Day 3.</div>} />
         </Routes>
       </main>

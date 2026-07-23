@@ -74,33 +74,14 @@ partner.post('/orders', async (c) => {
   const token = await shareToken(c.env.SHARE_TOKEN_SECRET, orderNo);
   const otp = String(Math.floor(1000 + Math.random() * 9000));
 
-  // We need a customer_id — for MVP, use a sentinel "partner-orders" profile,
-  // or the partner_id acts as customer. Simplest MVP: create a lightweight shell
-  // customer row keyed on partner reference. TODO Phase 2.
-  // For now we require the partner to have a linked profile (Phase 2 setup).
-  const { data: shellCustomer } = await db
-    .from('profiles')
-    .select('id')
-    .eq('email', `partner-${partnerId}@goride.partners`)
-    .maybeSingle();
-
-  let customerId = shellCustomer?.id;
-  if (!customerId) {
-    // Create a synthetic auth user via admin API — simplest: skip auth.users and
-    // just carry the partner_id (RLS is off for the Worker anyway).
-    // MVP fallback: use the partner's own uuid as customer_id (references profiles).
-    // Real fix in Phase 2: dedicated partner customer.
-    return c.json(
-      { error: { code: 'setup_incomplete', message: 'Ask admin to link a shell customer for this partner' } },
-      501,
-    );
-  }
-
+  // Partner orders carry customer_id=null and partner_id set. The 0003
+  // migration relaxed the not-null constraint with a check that at least
+  // one of the two IDs is present.
   const { data: inserted, error } = await db
     .from('orders')
     .insert({
       order_no: orderNo,
-      customer_id: customerId,
+      customer_id: null,
       service: body.service,
       status: 'searching',
       city: body.city,
