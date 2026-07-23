@@ -9,19 +9,9 @@ import PublicTrackPage from './features/customer/PublicTrackPage';
 import CaptainShell from './features/rider/CaptainShell';
 import AdminShell from './features/admin/AdminShell';
 import DevelopersPage from './features/developers/DevelopersPage';
+import LoadingScreen from './components/ui/LoadingScreen';
 
 type Target = 'customer' | 'rider' | 'admin' | undefined;
-
-function LoadingScreen() {
-  return (
-    <div className="h-full grid place-items-center bg-white">
-      <div className="text-center">
-        <div className="mx-auto h-10 w-10 rounded-xl bg-brand-500 animate-pulse" />
-        <p className="mt-3 text-sm text-slate-500">Loading…</p>
-      </div>
-    </div>
-  );
-}
 
 function RoleMismatch({ target, role, email, profileMissing, onSignOut }: {
   target: Exclude<Target, undefined>;

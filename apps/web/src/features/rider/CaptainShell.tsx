@@ -13,6 +13,7 @@ import TripPage from './TripPage';
 import OfferCard from './OfferCard';
 import { useOffers } from './hooks/useOffers';
 import { useRiderGps } from './hooks/useRiderGps';
+import LoadingScreen from '@/components/ui/LoadingScreen';
 
 interface Rider {
   status: 'offline' | 'online' | 'on_trip';
@@ -241,7 +242,7 @@ function HomePage({ me, refresh }: { me: MeResponse | null; refresh: () => Promi
 export default function CaptainShell() {
   const { me, loading, refresh } = useMe();
 
-  if (loading) return <div className="h-full grid place-items-center">Loading…</div>;
+  if (loading) return <LoadingScreen label="Getting your captain profile…" />;
 
   // Signed in but not yet a rider? Send to onboarding.
   const needsOnboarding = !me?.rider;

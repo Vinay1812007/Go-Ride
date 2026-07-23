@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import MapView from '@/components/MapView';
 import StatusStepper from '@/components/ui/StatusStepper';
+import LoadingScreen from '@/components/ui/LoadingScreen';
 import { api } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import type { LatLng, OrderStatus } from '@/lib/types';
@@ -96,7 +97,7 @@ export default function TrackingPage() {
     nav('/', { replace: true });
   }
 
-  if (!order) return <div className="h-full grid place-items-center">Loading…</div>;
+  if (!order) return <LoadingScreen label="Loading your trip…" />;
 
   return (
     <div className="h-full flex flex-col">

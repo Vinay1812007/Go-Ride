@@ -4,7 +4,7 @@ import { admin, broadcast } from './supabase';
 import { haversineKm } from './geo';
 
 // Bike/scooter customers accept scooter riders and vice-versa. Cabs & autos strict.
-function candidateVehicles(service: string): string[] {
+export function candidateVehicles(service: string): string[] {
   switch (service) {
     case 'bike':
     case 'scooter':
@@ -14,6 +14,20 @@ function candidateVehicles(service: string): string[] {
       return ['parcel_bike', 'parcel_scooter'];
     default:
       return [service];
+  }
+}
+
+// The inverse: given a rider's vehicle_type, which service types are they eligible for?
+export function servicesForVehicle(vehicle: string): string[] {
+  switch (vehicle) {
+    case 'bike':
+    case 'scooter':
+      return ['bike', 'scooter', 'parcel_bike', 'parcel_scooter'];  // rider can do parcel too
+    case 'parcel_bike':
+    case 'parcel_scooter':
+      return ['parcel_bike', 'parcel_scooter'];
+    default:
+      return [vehicle];
   }
 }
 
@@ -99,6 +113,51 @@ export async function dispatch(
     ),
   );
   return ranked.length;
+}
+
+// When a rider goes online, immediately look for orders they could serve —
+// searching or no_rider_found in their city, within a 10-minute window.
+// Directly inserts job_offers for this rider so they see them instantly,
+// and resets stalled no_rider_found orders back to searching (so the
+// customer's UI updates from red to yellow).
+export async function wakePendingForRider(
+  env: Env,
+  riderId: string,
+  riderCity: string,
+  riderVehicle: string,
+): Promise<number> {
+  const db = admin(env);
+  const cutoff = new Date(Date.now() - 10 * 60_000).toISOString();
+  const services = servicesForVehicle(riderVehicle);
+  const { data: orders } = await db
+    .from('orders')
+    .select('id, service, status, pickup_lat, pickup_lng')
+    .in('status', ['searching', 'no_rider_found'])
+    .in('service', services)
+    .ilike('city', riderCity)
+    .gte('created_at', cutoff)
+    .limit(10);
+  if (!orders || orders.length === 0) return 0;
+
+  const toReset = orders.filter((o) => o.status === 'no_rider_found').map((o) => o.id);
+  if (toReset.length > 0) {
+    await db.from('orders').update({ status: 'searching' }).in('id', toReset);
+    await Promise.all(
+      toReset.map((id) => broadcast(env, `order:${id}`, 'status', { status: 'searching' })),
+    );
+  }
+
+  const expiresAt = new Date(Date.now() + 25_000).toISOString();
+  const rows = orders.map((o) => ({ order_id: o.id, rider_id: riderId, expires_at: expiresAt }));
+  await db.from('job_offers').upsert(rows, { onConflict: 'order_id,rider_id', ignoreDuplicates: true });
+
+  await Promise.all(
+    orders.map((o) => broadcast(env, `rider:${riderId}`, 'offer', {
+      order_id: o.id,
+      expires_at: expiresAt,
+    })),
+  );
+  return orders.length;
 }
 
 // Called every minute by the cron trigger — expires offers, retries widening,
