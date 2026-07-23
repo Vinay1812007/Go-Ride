@@ -939,14 +939,49 @@ friendly log message — safe to have merged before OSRM is deployed.
 
 ---
 
-## 24. Phase 3 (not built)
+## 24. Driver earnings dashboard
 
-Nothing else on the roadmap I've been tracking. Ideas for later:
+Full ledger view for captains at `/captain/earnings`. Tap either of the
+Today / This-week cards on the captain home to open.
+
+- **Three-bucket hero:** Today / This week (Mon-based) / This month, each
+  showing earning + trip count.
+- **14-day bar chart:** brand-yellow bars scaled to the highest earning
+  day. Weekend / low-trip days show a muted grey stub so the chart never
+  looks empty. Title-tooltip on each bar has date + earning + trip count.
+- **Range toggle:** 7d / 30d / 90d — switches the trip list underneath
+  and the CSV export scope.
+- **Per-trip rows:** service label + order number, pickup → drop
+  addresses (truncated), completed timestamp, distance, payment method,
+  fare. Right side shows earning in green and commission below in
+  greyed-out text so the split is legible without becoming a math
+  puzzle.
+- **CSV export:** `⤓ CSV` button downloads
+  `goride-earnings-<days>d.csv` — date, order_no, service, pickup,
+  drop, distance_km, fare, payment, earning, commission.
+
+Backend endpoints on `apps/api/src/routes/riders.ts`:
+
+| Endpoint | Returns |
+|---|---|
+| `GET /riders/earnings/summary` | Three buckets + 14-day timeline + 30d total |
+| `GET /riders/earnings/trips?days=` | Folded per-order trip list (earning + commission per order) |
+| `GET /riders/earnings.csv?days=` | CSV download, up to 365 days |
+| `GET /riders/earnings` (legacy) | Kept for older clients — flat 30-day transaction list |
+
+All read from the existing `transactions` table populated by the
+`/rides/:orderId/complete` handler (transactions with `type =
+'trip_earning'` and `type = 'commission'`). RLS from §0002 already
+scopes rows to the calling rider.
+
+---
+
+## 25. Phase 3 (not built)
 
 - Native iOS APK (needs Apple Developer account + APNs cert).
 - Multi-city rate cards + service area polygons.
-- Driver earnings dashboard (weekly/monthly summaries).
 - Restaurant partner portal (their own admin login).
 - Playwright end-to-end tests for the critical flows.
+- Driver payout batching (weekly payout runs from `transactions`).
 
 Say what you want to tackle next.

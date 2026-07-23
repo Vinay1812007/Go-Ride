@@ -11,6 +11,7 @@ import { inr } from '@/lib/format';
 import OnboardPage from './OnboardPage';
 import TripPage from './TripPage';
 import OfferCard from './OfferCard';
+import EarningsPage from './EarningsPage';
 import { useOffers } from './hooks/useOffers';
 import { useRiderGps } from './hooks/useRiderGps';
 import LoadingScreen from '@/components/ui/LoadingScreen';
@@ -257,17 +258,21 @@ function HomePage({ me, refresh }: { me: MeResponse | null; refresh: () => Promi
           </div>
         )}
 
-        {/* Earnings */}
-        <div className="grid grid-cols-2 gap-3">
-          <div className="card">
+        {/* Earnings — tap through to the full dashboard */}
+        <NavLink
+          to="/captain/earnings"
+          className="grid grid-cols-2 gap-3 group"
+          aria-label="View full earnings"
+        >
+          <div className="card transition group-hover:shadow-lg">
             <div className="text-xs text-slate-500">Today</div>
             <div className="text-2xl font-bold">{inr(earnings?.today ?? 0)}</div>
           </div>
-          <div className="card">
-            <div className="text-xs text-slate-500">This week</div>
+          <div className="card transition group-hover:shadow-lg">
+            <div className="text-xs text-slate-500 flex items-center justify-between">This week <span className="text-slate-400">→</span></div>
             <div className="text-2xl font-bold">{inr(earnings?.week ?? 0)}</div>
           </div>
-        </div>
+        </NavLink>
 
         <p className="text-center text-xs text-slate-400 pt-2">
           Pull to refresh. Offers arrive automatically while online.
@@ -297,6 +302,7 @@ export default function CaptainShell() {
       />
       <Route path="onboard" element={<OnboardPage />} />
       <Route path="trip/:orderId" element={<TripPageWithGps />} />
+      <Route path="earnings" element={<EarningsPage />} />
       <Route path="*" element={<Navigate to="/captain" replace />} />
     </Routes>
   );
