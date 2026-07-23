@@ -17,6 +17,11 @@ jobs:
       fail-fast: false
       matrix:
         target: [customer, rider]
+    env:
+      # Two APK entry points: customer app targets goride-web, rider APK
+      # points at goride-captain. Both call the same Worker.
+      APP_ID: ${{ matrix.target == 'rider' && 'in.goride.captain' || 'in.goride.app' }}
+      APP_NAME: ${{ matrix.target == 'rider' && 'GoRide Captain' || 'GoRide' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -29,20 +34,39 @@ jobs:
       - name: Install deps
         run: npm ci
 
+      # ------------- Detect Worker URL (same as deploy.yml) -------------
+      - name: Resolve Worker URL
+        id: worker
+        env:
+          CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -e
+          SUB=$(curl -s "https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain" \
+            -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+            | node -e 'let s=""; process.stdin.on("data",d=>s+=d).on("end",()=>{ try{const j=JSON.parse(s); process.stdout.write(j.result?.subdomain||"")}catch{process.stdout.write("")} })' || echo "")
+          if [ -n "$SUB" ]; then
+            URL="https://goride-api.$SUB.workers.dev"
+          else
+            URL=""
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+          echo "Worker URL: ${URL:-'(unset — using fallback)'}"
+
       - name: Build web (${{ matrix.target }})
         working-directory: apps/web
         env:
           VITE_APP_TARGET:        ${{ matrix.target }}
-          VITE_SUPABASE_URL:      ${{ secrets.VITE_SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.VITE_SUPABASE_ANON_KEY }}
-          VITE_API_URL:           ${{ secrets.VITE_API_URL }}
+          VITE_SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+          VITE_API_URL:           ${{ steps.worker.outputs.url }}
           VITE_MAP_TILES_URL:     https://tiles.openfreemap.org/styles/liberty
           VITE_DEFAULT_CITY:      Hyderabad
           VITE_DEFAULT_LAT:       "17.3850"
           VITE_DEFAULT_LNG:       "78.4867"
         run: npm run build
 
-      # Add the Android platform on the fly (kept out of git per Capacitor convention).
+      # ------------- Capacitor + Android permissions -------------
       - name: Initialize Capacitor Android project
         working-directory: apps/web
         env:
@@ -51,9 +75,10 @@ jobs:
           npx cap add android || true
           npx cap sync android
 
-      # Rider APK needs background-location + foreground-service; customer does not.
       - name: Inject AndroidManifest permissions
         working-directory: apps/web/android/app/src/main
+        env:
+          MATRIX_TARGET: ${{ matrix.target }}
         run: |
           python3 - "$MATRIX_TARGET" <<'PY'
           import re, sys, pathlib
@@ -75,19 +100,41 @@ jobs:
           ]
           if target == "rider":
               perms.insert(4, "android.permission.ACCESS_BACKGROUND_LOCATION")
-          lines = "\n    ".join(f'<uses-permission android:name="{n}"/>' for n in perms)
-          s = re.sub(r"(<manifest[^>]*>)", r"\1\n    " + lines, s, count=1)
-          p.write_text(s)
+          existing = re.findall(r'<uses-permission android:name="([^"]+)"', s)
+          new = [n for n in perms if n not in existing]
+          if new:
+              lines = "\n    ".join(f'<uses-permission android:name="{n}"/>' for n in new)
+              s = re.sub(r"(<manifest[^>]*>)", r"\1\n    " + lines, s, count=1)
+              p.write_text(s)
+              print(f"Added {len(new)} permission(s)")
+          else:
+              print("All permissions already present")
           PY
+
+      # ------------- Build APK: signed if keystore secret exists, else unsigned debug -------------
+      - name: Check for signing keystore
+        id: keystore
         env:
-          MATRIX_TARGET: ${{ matrix.target }}
+          B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: |
+          if [ -n "$B64" ]; then
+            echo "have=true" >> "$GITHUB_OUTPUT"
+            echo "🔐 Keystore secret found — will produce signed release APK"
+          else
+            echo "have=false" >> "$GITHUB_OUTPUT"
+            echo "⚠️  No ANDROID_KEYSTORE_B64 secret — will produce UNSIGNED debug APK"
+            echo "    Fine for sideload testing; add the secret before publishing to Play Store."
+          fi
 
       - name: Decode keystore
+        if: steps.keystore.outputs.have == 'true'
         working-directory: apps/web/android
-        run: |
-          echo "${{ secrets.ANDROID_KEYSTORE_B64 }}" | base64 -d > app/release.keystore
+        env:
+          B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+        run: printf "%s" "$B64" | base64 -d > app/release.keystore
 
-      - name: Build signed APK
+      - name: Build signed release APK
+        if: steps.keystore.outputs.have == 'true'
         working-directory: apps/web/android
         env:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
@@ -101,17 +148,46 @@ jobs:
             -Pandroid.injected.signing.key.alias=$KEY_ALIAS \
             -Pandroid.injected.signing.key.password=$KEY_PASSWORD
 
-      - name: Rename APK
-        working-directory: apps/web/android/app/build/outputs/apk/release
-        run: mv app-release.apk goride-${{ matrix.target }}.apk
+      - name: Build unsigned debug APK
+        if: steps.keystore.outputs.have != 'true'
+        working-directory: apps/web/android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Locate + rename APK
+        id: apk
+        working-directory: apps/web/android
+        run: |
+          set -e
+          if [ "${{ steps.keystore.outputs.have }}" = "true" ]; then
+            SRC=$(find app/build/outputs/apk/release -name "*.apk" | head -1)
+            DEST="goride-${{ matrix.target }}.apk"
+          else
+            SRC=$(find app/build/outputs/apk/debug -name "*.apk" | head -1)
+            DEST="goride-${{ matrix.target }}-debug.apk"
+          fi
+          cp "$SRC" "$DEST"
+          ls -la "$DEST"
+          echo "path=apps/web/android/$DEST" >> "$GITHUB_OUTPUT"
+          echo "name=$DEST" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-artifact@v4
         with:
-          name: goride-${{ matrix.target }}-apk
-          path: apps/web/android/app/build/outputs/apk/release/goride-${{ matrix.target }}.apk
+          name: ${{ steps.apk.outputs.name }}
+          path: ${{ steps.apk.outputs.path }}
 
       - name: Attach to Release
-        if: startsWith(github.ref, 'refs/tags/')
+        if: startsWith(github.ref, 'refs/tags/') && steps.keystore.outputs.have == 'true'
         uses: softprops/action-gh-release@v2
         with:
-          files: apps/web/android/app/build/outputs/apk/release/goride-${{ matrix.target }}.apk
+          files: ${{ steps.apk.outputs.path }}
+
+      - name: Summary
+        run: |
+          echo "### APK build — ${{ matrix.target }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Type: ${{ steps.keystore.outputs.have == 'true' && '✅ signed release' || '⚠️ unsigned debug (sideload only)' }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- File: \`${{ steps.apk.outputs.name }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Worker: \`${{ steps.worker.outputs.url || '(unset)' }}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Download from the 'Artifacts' section of this run" >> "$GITHUB_STEP_SUMMARY"
