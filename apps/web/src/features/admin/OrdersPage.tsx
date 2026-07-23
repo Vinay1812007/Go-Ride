@@ -45,6 +45,7 @@ interface DispatchReport {
 }
 
 const FILTERS: Array<{ label: string; value: OrderStatus | 'searching_only' | 'all' }> = [
+  { label: 'Scheduled', value: 'scheduled' },
   { label: 'Searching', value: 'searching_only' },
   { label: 'Active',    value: 'accepted' },
   { label: 'Completed', value: 'completed' },
@@ -237,6 +238,7 @@ export default function OrdersPage() {
 
 function StatusChip({ status }: { status: OrderStatus }) {
   const styles: Record<OrderStatus, string> = {
+    scheduled:          'bg-brand-50 text-brand-800 border border-brand-400',
     searching:          'bg-amber-50 text-amber-800 border border-amber-400',
     accepted:           'bg-blue-50 text-blue-800 border border-blue-400',
     arrived:            'bg-blue-50 text-blue-800 border border-blue-400',

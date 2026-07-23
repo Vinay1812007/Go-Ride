@@ -11,6 +11,7 @@ const STEPS: Array<{ id: OrderStatus | 'pickup'; label: string; forParcel?: bool
 ];
 
 const ORDER: Record<OrderStatus, number> = {
+  scheduled: 0,   // shouldn't reach the stepper — routing sends scheduled orders to History
   searching: 0, accepted: 1, arrived: 2, picked_up: 3, in_transit: 3,
   delivered: 4, completed: 4,
   cancelled_customer: -1, cancelled_rider: -1, no_rider_found: -1,

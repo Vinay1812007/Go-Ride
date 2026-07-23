@@ -512,10 +512,36 @@ re-run the deploy.
 
 ---
 
-## 14. Phase 2 (not built yet)
+## 14. Scheduled rides
+
+Customers can book rides 30 minutes to 7 days ahead.
+
+- **Customer flow:** Order screen → **Schedule** toggle → pick a pickup
+  time in a bottom-sheet datetime picker → confirm. Scheduled orders land
+  in **History → Upcoming**, with **Start now** (immediate dispatch) and
+  **Cancel** buttons per row.
+- **Backend flow:** creation stores `orders.status = 'scheduled'` and
+  `orders.scheduled_at`. The minutely `promoteScheduled` cron
+  (`apps/api/src/lib/dispatch.ts`) flips any row where
+  `scheduled_at <= now + 5min` into `searching` and kicks
+  `dispatch(orderId)`. The 5-minute lead is `LEAD_MINUTES` — increase it
+  if riders keep arriving late.
+- **Guards:** the API rejects `scheduled_at` less than 30min or more than
+  7 days out. Reschedule and start-now are guarded on
+  `status='scheduled'`, so if the cron has already promoted the order the
+  operation returns 404 (customer sees "already dispatched").
+- **Admin visibility:** Orders → **Scheduled** filter lists all upcoming
+  bookings; each row uses a yellow "scheduled" chip.
+
+Schema is in `supabase/migrations/0004_scheduled_rides.sql` — apply via
+**Actions → Apply Supabase migrations → target: all** (or
+`scheduled-rides` for just this file).
+
+---
+
+## 15. Phase 2 (not built yet)
 
 - Food delivery UI (schema and rate cards already support it).
-- Scheduled rides (`orders.scheduled_at` column ready).
 - Promo codes / referral bonuses.
 - In-app chat between customer and captain.
 - Self-hosted OSRM on Fly.io free tier.

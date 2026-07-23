@@ -28,12 +28,16 @@ export const fareQuoteBody = z.object({
 });
 
 // POST /orders (customer)
+// scheduled_at: optional ISO8601 timestamp. When set, the order is created
+// with status='scheduled' and dispatch is deferred. A cron on the Worker
+// promotes it to 'searching' as the pickup time approaches.
 export const createOrderBody = z.object({
   service: serviceType,
   city: z.string().min(2).default('Hyderabad'),
   pickup: latLng.extend({ address: z.string().min(3) }),
   drop: latLng.extend({ address: z.string().min(3) }),
   payment_method: z.enum(['cash', 'upi', 'wallet']).default('cash'),
+  scheduled_at: z.string().datetime().optional(),
   parcel: z
     .object({
       weight_kg: z.number().positive().max(1000),
@@ -49,6 +53,11 @@ export const createOrderBody = z.object({
       instructions: z.string().optional(),
     })
     .optional(),
+});
+
+// PATCH /orders/:id/schedule — reschedule a scheduled order
+export const rescheduleBody = z.object({
+  scheduled_at: z.string().datetime(),
 });
 
 // POST /rides/location (rider heartbeat)

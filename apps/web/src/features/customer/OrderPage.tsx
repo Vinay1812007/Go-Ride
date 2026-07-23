@@ -1,11 +1,12 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import MapView from '@/components/MapView';
 import VehicleSelector, { type VehicleQuote } from '@/components/VehicleSelector';
 import BottomSheet from '@/components/ui/BottomSheet';
 import { api } from '@/lib/api';
 import type { LatLng, ServiceType, QuoteResult } from '@/lib/types';
-import { inr } from '@/lib/format';
+import { inr, scheduleLabel } from '@/lib/format';
+import { cn } from '@/lib/cn';
 
 interface OrderState {
   pickup: LatLng & { address: string };
@@ -27,6 +28,25 @@ export default function OrderPage() {
   const [parcel, setParcel] = useState({ weight_kg: 2, contents: '', receiver_name: '', receiver_phone: '' });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // ── Scheduling ─────────────────────────────────────────────────────────
+  // whenMode 'now' skips the picker; 'later' opens it inline. scheduledAt is
+  // an ISO string in the user's local timezone (translated to UTC on submit
+  // by the Date object). Bound: 31 min → 7d out to satisfy the API guard.
+  const [whenMode, setWhenMode] = useState<'now' | 'later'>('now');
+  const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [scheduledAt, setScheduledAt] = useState<string>('');
+  const minLocal = useMemo(() => {
+    // datetime-local expects "YYYY-MM-DDTHH:mm" in local time.
+    const t = new Date(Date.now() + 31 * 60_000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
+  }, []);
+  const maxLocal = useMemo(() => {
+    const t = new Date(Date.now() + 7 * 24 * 60 * 60_000);
+    const pad = (n: number) => String(n).padStart(2, '0');
+    return `${t.getFullYear()}-${pad(t.getMonth() + 1)}-${pad(t.getDate())}T${pad(t.getHours())}:${pad(t.getMinutes())}`;
+  }, []);
 
   const services = state?.category === 'parcel' ? PARCEL_SERVICES : RIDE_SERVICES;
 
@@ -90,17 +110,32 @@ export default function OrderPage() {
         return;
       }
     }
+    // Scheduling guard: if user chose 'later' but didn't pick a time yet,
+    // open the picker instead of submitting.
+    if (whenMode === 'later' && !scheduledAt) {
+      setScheduleOpen(true);
+      return;
+    }
     setSubmitting(true); setError(null);
     try {
-      const res = await api.post<{ id: string; order_no: string; otp: string }>('/orders', {
+      const scheduledIso = whenMode === 'later' && scheduledAt
+        ? new Date(scheduledAt).toISOString()
+        : undefined;
+      const res = await api.post<{ id: string; order_no: string; otp: string; status?: string }>('/orders', {
         service: selected,
         city: import.meta.env.VITE_DEFAULT_CITY,
         pickup: { lat: state.pickup.lat, lng: state.pickup.lng, address: state.pickup.address },
         drop:   { lat: state.drop.lat, lng: state.drop.lng, address: state.drop.address },
         payment_method: 'cash',
         parcel: isParcel ? parcel : undefined,
+        scheduled_at: scheduledIso,
       });
-      nav(`/track/${res.id}`, { replace: true });
+      // Scheduled orders go to History → Upcoming; live orders go to Tracking.
+      if (res.status === 'scheduled') {
+        nav('/history?tab=upcoming', { replace: true });
+      } else {
+        nav(`/track/${res.id}`, { replace: true });
+      }
     } catch (e: any) {
       setError(e.message ?? 'Could not create order');
     } finally {
@@ -146,6 +181,40 @@ export default function OrderPage() {
             onSelect={setSelected}
           />
 
+          {/* Now / Later toggle */}
+          <div className="mt-4 flex gap-2 bg-surface-muted rounded-xl p-1">
+            <button
+              type="button"
+              onClick={() => { setWhenMode('now'); setScheduledAt(''); }}
+              className={cn(
+                'flex-1 text-sm py-2 rounded-lg font-medium transition',
+                whenMode === 'now' ? 'bg-white shadow-card' : 'text-slate-500',
+              )}
+            >
+              🕒 Pickup now
+            </button>
+            <button
+              type="button"
+              onClick={() => { setWhenMode('later'); setScheduleOpen(true); }}
+              className={cn(
+                'flex-1 text-sm py-2 rounded-lg font-medium transition',
+                whenMode === 'later' ? 'bg-white shadow-card' : 'text-slate-500',
+              )}
+            >
+              📅 Schedule
+            </button>
+          </div>
+          {whenMode === 'later' && scheduledAt && (
+            <button
+              type="button"
+              onClick={() => setScheduleOpen(true)}
+              className="mt-2 w-full text-xs text-left px-3 py-2 rounded-lg bg-brand-50 border border-brand-200 text-brand-800"
+            >
+              Pickup {scheduleLabel(new Date(scheduledAt).toISOString())}
+              <span className="text-brand-700 float-right">Change →</span>
+            </button>
+          )}
+
           {error && <p className="text-sm text-red-600 mt-3">{error}</p>}
 
           <button
@@ -158,11 +227,47 @@ export default function OrderPage() {
               : selected
                 ? isParcel && !parcelOpen
                   ? `Continue · ${inr(quotes[selected]?.fare)}`
-                  : `Confirm · ${inr(quotes[selected]?.fare)}`
+                  : whenMode === 'later'
+                    ? `Schedule ride · ${inr(quotes[selected]?.fare)}`
+                    : `Confirm · ${inr(quotes[selected]?.fare)}`
                 : 'Select a vehicle'}
           </button>
         </div>
       </div>
+
+      {/* Datetime picker sheet */}
+      <BottomSheet
+        open={scheduleOpen}
+        onClose={() => setScheduleOpen(false)}
+        title="Pickup time"
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-slate-500">
+            Choose a pickup between 30 minutes and 7 days from now. We'll find
+            you a captain about 5 minutes before pickup.
+          </p>
+          <input
+            type="datetime-local"
+            className="input"
+            value={scheduledAt}
+            min={minLocal}
+            max={maxLocal}
+            onChange={(e) => setScheduledAt(e.target.value)}
+          />
+          {scheduledAt && (
+            <div className="text-sm rounded-xl bg-surface-muted p-3">
+              Pickup <span className="font-semibold">{scheduleLabel(new Date(scheduledAt).toISOString())}</span>
+            </div>
+          )}
+          <button
+            onClick={() => { setWhenMode('later'); setScheduleOpen(false); }}
+            disabled={!scheduledAt}
+            className="btn-primary w-full"
+          >
+            Done
+          </button>
+        </div>
+      </BottomSheet>
 
       {isParcel && (
         <BottomSheet

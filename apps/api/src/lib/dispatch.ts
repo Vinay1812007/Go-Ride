@@ -160,6 +160,37 @@ export async function wakePendingForRider(
   return orders.length;
 }
 
+// Called every minute by the cron trigger — flips scheduled orders whose
+// pickup time is within LEAD_MINUTES into 'searching' and kicks off dispatch.
+// Why lead time: rider search + accept + drive-to-pickup takes several
+// minutes. Starting exactly at scheduled_at leaves the customer waiting.
+// LEAD_MINUTES = 5 gives us a small pre-dispatch window without paging the
+// captain too early.
+export async function promoteScheduled(env: Env): Promise<{ promoted: number }> {
+  const LEAD_MINUTES = 5;
+  const db = admin(env);
+  const nowIso = new Date().toISOString();
+  const dueBefore = new Date(Date.now() + LEAD_MINUTES * 60_000).toISOString();
+
+  // Atomic-per-row flip: guard on status='scheduled' so if two cron ticks race
+  // (or a customer manually taps "Start now"), only one wins.
+  const { data: due } = await db
+    .from('orders')
+    .update({ status: 'searching', dispatch_started_at: nowIso })
+    .eq('status', 'scheduled')
+    .not('scheduled_at', 'is', null)
+    .lte('scheduled_at', dueBefore)
+    .select('id');
+
+  const rows = due ?? [];
+  for (const o of rows) {
+    // Fire-and-forget — one failing order shouldn't block the others.
+    dispatch(env, o.id).catch((e) => console.warn('promoteScheduled dispatch', o.id, e));
+    await broadcast(env, `order:${o.id}`, 'status', { status: 'searching' }).catch(() => {});
+  }
+  return { promoted: rows.length };
+}
+
 // Called every minute by the cron trigger — expires offers, retries widening,
 // and marks abandoned orders no_rider_found after 60s.
 export async function sweepOffers(env: Env): Promise<{ expired: number; noRider: number }> {

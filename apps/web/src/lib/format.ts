@@ -32,6 +32,7 @@ export function serviceLabel(s: ServiceType): string {
 
 export function statusLabel(s: OrderStatus): string {
   switch (s) {
+    case 'scheduled':          return 'Scheduled';
     case 'searching':          return 'Finding your captain';
     case 'accepted':           return 'Captain on the way';
     case 'arrived':            return 'Captain arrived';
@@ -47,4 +48,37 @@ export function statusLabel(s: OrderStatus): string {
 
 export function isFinalStatus(s: OrderStatus): boolean {
   return ['completed', 'delivered', 'cancelled_customer', 'cancelled_rider', 'no_rider_found'].includes(s);
+}
+
+// Human-friendly pickup time — "Today at 6:30 PM", "Tomorrow at 9:00 AM",
+// "Sat, 26 Jul at 11:15 AM". Falls back to a full toLocaleString for far dates.
+export function scheduleLabel(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  const now = new Date();
+  const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const target  = new Date(d.getFullYear(),   d.getMonth(),   d.getDate());
+  const dayDiff = Math.round((target.getTime() - midnight.getTime()) / 86_400_000);
+  const time = d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' });
+  if (dayDiff === 0) return `Today at ${time}`;
+  if (dayDiff === 1) return `Tomorrow at ${time}`;
+  if (dayDiff > 1 && dayDiff < 7) {
+    return `${d.toLocaleDateString(undefined, { weekday: 'short' })}, ${d.toLocaleDateString(undefined, { day: 'numeric', month: 'short' })} at ${time}`;
+  }
+  return d.toLocaleString(undefined, { day: 'numeric', month: 'short', hour: 'numeric', minute: '2-digit' });
+}
+
+// Countdown to a scheduled pickup — "in 2h 15m", "in 45m", "5m ago" (rare —
+// means the cron promotion is running late).
+export function scheduleCountdown(iso: string | null | undefined): string {
+  if (!iso) return '';
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return '';
+  const deltaMin = Math.round((t - Date.now()) / 60_000);
+  if (deltaMin < 0) return `${-deltaMin}m ago`;
+  if (deltaMin < 60) return `in ${deltaMin}m`;
+  const h = Math.floor(deltaMin / 60);
+  const m = deltaMin % 60;
+  return m ? `in ${h}h ${m}m` : `in ${h}h`;
 }

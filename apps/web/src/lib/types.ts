@@ -13,6 +13,7 @@ export type ServiceType =
 export type Role = 'customer' | 'rider' | 'admin';
 
 export type OrderStatus =
+  | 'scheduled'
   | 'searching'
   | 'accepted'
   | 'arrived'
@@ -67,6 +68,7 @@ export interface OrderSummary {
   drop_address: string;
   fare_final?: number | null;
   fare_estimate?: number | null;
+  scheduled_at?: string | null;
   created_at: string;
   completed_at?: string | null;
 }

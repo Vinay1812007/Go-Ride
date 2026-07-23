@@ -2,9 +2,23 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/env';
 import { requireAuth, requireRole } from '../lib/auth';
 import { admin, broadcast } from '../lib/supabase';
-import { createOrderBody, cancelBody, rateBody } from '../lib/schemas';
+import { createOrderBody, cancelBody, rateBody, rescheduleBody } from '../lib/schemas';
 import { quoteInternal } from './fare';
 import { dispatch } from '../lib/dispatch';
+
+// Booking a ride "for later" needs some sanity: at least 30 minutes out (so
+// the cron's LEAD_MINUTES window isn't already past), at most 7 days out.
+const SCHEDULE_MIN_MS = 30 * 60_000;
+const SCHEDULE_MAX_MS = 7 * 24 * 60 * 60_000;
+
+function validateScheduleWindow(iso: string): string | null {
+  const t = new Date(iso).getTime();
+  if (!Number.isFinite(t)) return 'invalid scheduled_at';
+  const delta = t - Date.now();
+  if (delta < SCHEDULE_MIN_MS) return 'must be at least 30 minutes from now';
+  if (delta > SCHEDULE_MAX_MS) return 'cannot be more than 7 days from now';
+  return null;
+}
 import { shareToken } from '../lib/hmac';
 import type { z } from 'zod';
 
@@ -53,13 +67,21 @@ orders.post('/', requireAuth, requireRole('customer'), async (c) => {
   const orderNo = (nums as unknown as string) ?? `GR-${Date.now()}`;
   const token = await shareToken(c.env.SHARE_TOKEN_SECRET, orderNo);
 
+  // Branch: schedule for later vs dispatch now.
+  const isScheduled = !!body.scheduled_at;
+  if (isScheduled) {
+    const err = validateScheduleWindow(body.scheduled_at!);
+    if (err) return c.json({ error: { code: 'bad_schedule', message: err } }, 400);
+  }
+
   const { data: inserted, error } = await db
     .from('orders')
     .insert({
       order_no: orderNo,
       customer_id: c.get('userId'),
       service: body.service,
-      status: 'searching',
+      status: isScheduled ? 'scheduled' : 'searching',
+      scheduled_at: isScheduled ? body.scheduled_at : null,
       city: body.city,
       pickup_lat: body.pickup.lat,
       pickup_lng: body.pickup.lng,
@@ -77,17 +99,22 @@ orders.post('/', requireAuth, requireRole('customer'), async (c) => {
       parcel_details: body.parcel ?? null,
       share_token: token,
     })
-    .select('id, order_no, otp, share_token')
+    .select('id, order_no, otp, share_token, scheduled_at, status')
     .single();
   if (error || !inserted) return c.json({ error: { code: 'insert_failed', message: error?.message } }, 500);
 
-  // Kick off dispatch (don't block the response longer than needed).
-  c.executionCtx.waitUntil(dispatch(c.env, inserted.id).catch((e) => console.warn('dispatch', e)));
+  // Only kick off dispatch immediately for now-orders. Scheduled orders wait
+  // for the minutely cron to promote them.
+  if (!isScheduled) {
+    c.executionCtx.waitUntil(dispatch(c.env, inserted.id).catch((e) => console.warn('dispatch', e)));
+  }
 
   return c.json({
     id: inserted.id,
     order_no: inserted.order_no,
     otp: inserted.otp,
+    status: inserted.status,
+    scheduled_at: inserted.scheduled_at,
     tracking_url: `/t/${inserted.order_no}?k=${inserted.share_token}`,
     fare: breakup.total,
     fare_breakup: breakup,
@@ -96,15 +123,62 @@ orders.post('/', requireAuth, requireRole('customer'), async (c) => {
   });
 });
 
+// -------- PATCH /:id/schedule — reschedule a scheduled order --------
+orders.patch('/:id/schedule', requireAuth, requireRole('customer'), async (c) => {
+  const body = await parse(c, rescheduleBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const err = validateScheduleWindow(body.scheduled_at);
+  if (err) return c.json({ error: { code: 'bad_schedule', message: err } }, 400);
+
+  const db = admin(c.env);
+  const uid = c.get('userId')!;
+  const { data, error } = await db
+    .from('orders')
+    .update({ scheduled_at: body.scheduled_at })
+    .eq('id', c.req.param('id'))
+    .eq('customer_id', uid)
+    .eq('status', 'scheduled')       // guard: can't reschedule a live order
+    .select('id, scheduled_at')
+    .maybeSingle();
+  if (error) return c.json({ error: { code: 'update_failed', message: error.message } }, 500);
+  if (!data) return c.json({ error: { code: 'not_found_or_started' } }, 404);
+  return c.json({ id: data.id, scheduled_at: data.scheduled_at });
+});
+
+// -------- POST /:id/start-now — customer chooses to dispatch a scheduled order early --------
+orders.post('/:id/start-now', requireAuth, requireRole('customer'), async (c) => {
+  const db = admin(c.env);
+  const uid = c.get('userId')!;
+  const { data, error } = await db
+    .from('orders')
+    .update({ status: 'searching', dispatch_started_at: new Date().toISOString() })
+    .eq('id', c.req.param('id'))
+    .eq('customer_id', uid)
+    .eq('status', 'scheduled')
+    .select('id')
+    .maybeSingle();
+  if (error) return c.json({ error: { code: 'update_failed', message: error.message } }, 500);
+  if (!data) return c.json({ error: { code: 'not_found_or_started' } }, 404);
+  c.executionCtx.waitUntil(dispatch(c.env, data.id).catch((e) => console.warn('start-now dispatch', e)));
+  return c.json({ id: data.id, status: 'searching' });
+});
+
 // -------- GET / — list customer's orders --------
+// ?upcoming=1 filters to scheduled orders (sorted by pickup time ascending).
+// Everything else returns the flat history sorted by created_at desc.
 orders.get('/', requireAuth, requireRole('customer'), async (c) => {
   const uid = c.get('userId')!;
-  const { data } = await admin(c.env)
+  const upcoming = c.req.query('upcoming') === '1';
+  const q = admin(c.env)
     .from('orders')
-    .select('id, order_no, service, status, pickup_address, drop_address, fare_final, fare_estimate, created_at, completed_at')
-    .eq('customer_id', uid)
-    .order('created_at', { ascending: false })
-    .limit(50);
+    .select('id, order_no, service, status, pickup_address, drop_address, fare_final, fare_estimate, scheduled_at, created_at, completed_at')
+    .eq('customer_id', uid);
+  if (upcoming) {
+    q.eq('status', 'scheduled').order('scheduled_at', { ascending: true });
+  } else {
+    q.order('created_at', { ascending: false });
+  }
+  const { data } = await q.limit(50);
   return c.json({ orders: data ?? [] });
 });
 

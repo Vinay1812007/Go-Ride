@@ -2,7 +2,7 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import type { AppEnv, Env } from './lib/env';
-import { sweepOffers } from './lib/dispatch';
+import { sweepOffers, promoteScheduled } from './lib/dispatch';
 import auth from './routes/auth';
 import fare from './routes/fare';
 import orders from './routes/orders';
@@ -50,13 +50,19 @@ export default {
       console.log('pruned', data, 'rider_locations rows');
       return;
     }
-    // Every minute → sweep expired offers + widen dispatch
+    // Every minute → sweep expired offers, widen dispatch, promote scheduled
     if (event.cron === '* * * * *') {
       try {
         const r = await sweepOffers(env);
         if (r.expired || r.noRider) console.log('sweep', r);
       } catch (e) {
         console.warn('sweep failed', e);
+      }
+      try {
+        const p = await promoteScheduled(env);
+        if (p.promoted) console.log('promoted', p.promoted, 'scheduled orders');
+      } catch (e) {
+        console.warn('promoteScheduled failed', e);
       }
     }
   },
