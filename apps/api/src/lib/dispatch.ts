@@ -43,13 +43,16 @@ export async function dispatch(
   if (order.status !== 'searching') return 0;
 
   const vehicles = candidateVehicles(order.service);
-  const staleAfter = new Date(Date.now() - 60_000).toISOString();
+  // 5 min forgiveness — GPS heartbeats can hiccup on residential WiFi, and
+  // browsers may throttle background pings. Losing riders after 60s made
+  // dispatch fragile.
+  const staleAfter = new Date(Date.now() - 5 * 60_000).toISOString();
 
   const { data: candidates, error: rerr } = await db
     .from('riders')
     .select('id, last_lat, last_lng')
     .in('vehicle_type', vehicles)
-    .eq('city', order.city)
+    .ilike('city', order.city)                    // case-insensitive
     .eq('status', 'online')
     .eq('kyc', 'approved')
     .gte('last_seen', staleAfter);

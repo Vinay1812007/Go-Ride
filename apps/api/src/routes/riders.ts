@@ -39,11 +39,19 @@ riders.post('/onboard', requireAuth, async (c) => {
 
 riders.post('/online', requireAuth, requireRole('rider'), async (c) => {
   const uid = c.get('userId')!;
+  const body = await c.req.json().catch(() => ({} as { lat?: number; lng?: number }));
   const { data } = await admin(c.env).from('riders').select('kyc').eq('id', uid).maybeSingle();
   if (data?.kyc !== 'approved') {
     return c.json({ error: { code: 'kyc_required', message: 'Awaiting KYC approval' } }, 403);
   }
-  await admin(c.env).from('riders').update({ status: 'online', last_seen: new Date().toISOString() }).eq('id', uid);
+  const patch: Record<string, unknown> = { status: 'online', last_seen: new Date().toISOString() };
+  // If the client sends an initial location on go-online, seed it so dispatch
+  // has a fresh position immediately (not just when the first heartbeat lands).
+  if (typeof body.lat === 'number' && typeof body.lng === 'number') {
+    patch.last_lat = body.lat;
+    patch.last_lng = body.lng;
+  }
+  await admin(c.env).from('riders').update(patch).eq('id', uid);
   return c.json({ ok: true });
 });
 

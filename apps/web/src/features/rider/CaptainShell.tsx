@@ -111,7 +111,21 @@ function HomePage({ me, refresh }: { me: MeResponse | null; refresh: () => Promi
     setBusy(true); setError(null);
     try {
       if (status === 'offline') {
-        await api.post('/riders/online');
+        // Try to send an initial position on go-online so dispatch has a
+        // fresh location right away, not after the first heartbeat.
+        let initialLoc: { lat: number; lng: number } | undefined;
+        try {
+          const pos = await new Promise<GeolocationPosition>((res, rej) => {
+            navigator.geolocation.getCurrentPosition(res, rej, {
+              enableHighAccuracy: true, timeout: 8_000, maximumAge: 0,
+            });
+          });
+          initialLoc = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        } catch {
+          // No location permission or timed out — still allow going online,
+          // heartbeat will pick up the position once granted.
+        }
+        await api.post('/riders/online', initialLoc);
       } else {
         await api.post('/riders/offline');
       }

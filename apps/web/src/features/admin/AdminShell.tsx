@@ -6,6 +6,7 @@ import { api } from '@/lib/api';
 import { inr, serviceLabel } from '@/lib/format';
 import type { ServiceType } from '@/lib/types';
 import RidersPage from './RidersPage';
+import OrdersPage from './OrdersPage';
 
 interface Stats { online_riders: number; active_orders: number; revenue_today: number }
 interface RateCard { id: number; city: string; service: ServiceType; base_fare: number; base_km: number; per_km: number; per_min: number; min_fare: number; surge_multiplier: number; commission_pct: number; active: boolean }
@@ -105,6 +106,7 @@ export default function AdminShell() {
           <Route path="" element={<Dashboard />} />
           <Route path="rate-cards" element={<RateCards />} />
           <Route path="riders" element={<RidersPage />} />
+          <Route path="orders" element={<OrdersPage />} />
           <Route path="*" element={<div className="p-4 text-slate-500">Coming in Day 3.</div>} />
         </Routes>
       </main>

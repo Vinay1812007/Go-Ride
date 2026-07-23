@@ -3,6 +3,8 @@ import type { AppEnv } from '../lib/env';
 import { requireAuth, requireRole } from '../lib/auth';
 import { admin } from '../lib/supabase';
 import { rateCardBody, refundBody } from '../lib/schemas';
+import { dispatch } from '../lib/dispatch';
+import { haversineKm } from '../lib/geo';
 import type { z } from 'zod';
 
 const adminRoute = new Hono<AppEnv>();
@@ -76,6 +78,94 @@ adminRoute.get('/orders', async (c) => {
   if (status) q = q.eq('status', status);
   const { data } = await q;
   return c.json({ orders: data ?? [] });
+});
+
+// ---- Force re-dispatch a stuck order ----
+adminRoute.post('/orders/:id/redispatch', async (c) => {
+  const orderId = c.req.param('id');
+  const db = admin(c.env);
+  const { data: order } = await db
+    .from('orders')
+    .select('id, status')
+    .eq('id', orderId)
+    .maybeSingle();
+  if (!order) return c.json({ error: { code: 'not_found' } }, 404);
+  if (['completed', 'delivered', 'cancelled_customer', 'cancelled_rider'].includes(order.status)) {
+    return c.json({ error: { code: 'already_final' } }, 409);
+  }
+  // Reset to searching if it was stuck at no_rider_found or similar
+  if (order.status !== 'accepted' && order.status !== 'arrived' && order.status !== 'picked_up' && order.status !== 'in_transit') {
+    await db.from('orders').update({ status: 'searching' }).eq('id', orderId);
+  }
+  const n = await dispatch(c.env, orderId, { radiusKm: 15, maxRiders: 10, offerTtlSec: 25 });
+  return c.json({ ok: true, offers_sent: n });
+});
+
+// ---- Explain why an order didn't get matched ----
+adminRoute.get('/orders/:id/dispatch-report', async (c) => {
+  const orderId = c.req.param('id');
+  const db = admin(c.env);
+  const { data: order } = await db
+    .from('orders')
+    .select('id, service, city, status, pickup_lat, pickup_lng, created_at')
+    .eq('id', orderId)
+    .maybeSingle();
+  if (!order) return c.json({ error: { code: 'not_found' } }, 404);
+
+  const { data: allRiders } = await db
+    .from('riders')
+    .select('id, status, vehicle_type, city, kyc, last_lat, last_lng, last_seen, profiles!inner(full_name)');
+  const fiveMinAgo = Date.now() - 5 * 60_000;
+
+  const rows = (allRiders ?? []).map((r) => {
+    const reasons: string[] = [];
+    if (r.status !== 'online') reasons.push(`status=${r.status}`);
+    if (r.kyc !== 'approved') reasons.push(`kyc=${r.kyc}`);
+    if (r.city?.toLowerCase() !== order.city?.toLowerCase()) reasons.push(`city="${r.city}"≠"${order.city}"`);
+    if (!r.last_seen || new Date(r.last_seen).getTime() < fiveMinAgo) reasons.push('gps_stale');
+    if (!r.last_lat || !r.last_lng) reasons.push('no_location');
+    const distanceKm = r.last_lat != null && r.last_lng != null
+      ? haversineKm(order.pickup_lat, order.pickup_lng, r.last_lat, r.last_lng)
+      : null;
+    // Vehicle match — bike/scooter/parcel_bike are fungible on the customer side,
+    // but rider's vehicle_type must be in the candidate set for the ORDER's service.
+    const candidates = ['bike', 'scooter'].includes(order.service)
+      ? ['bike', 'scooter']
+      : ['parcel_bike', 'parcel_scooter'].includes(order.service)
+        ? ['parcel_bike', 'parcel_scooter']
+        : [order.service];
+    if (!candidates.includes(r.vehicle_type)) reasons.push(`vehicle=${r.vehicle_type}`);
+
+    return {
+      rider_id: r.id,
+      name: (r as any).profiles?.full_name,
+      status: r.status,
+      vehicle_type: r.vehicle_type,
+      city: r.city,
+      kyc: r.kyc,
+      last_seen: r.last_seen,
+      distance_km: distanceKm ? Number(distanceKm.toFixed(2)) : null,
+      eligible: reasons.length === 0,
+      reasons,
+    };
+  });
+
+  const eligible = rows.filter((r) => r.eligible);
+  return c.json({
+    order: {
+      id: order.id,
+      service: order.service,
+      city: order.city,
+      status: order.status,
+      pickup: [order.pickup_lat, order.pickup_lng],
+      age_seconds: Math.round((Date.now() - new Date(order.created_at).getTime()) / 1000),
+    },
+    total_riders: rows.length,
+    eligible_count: eligible.length,
+    within_5km: eligible.filter((r) => (r.distance_km ?? Infinity) <= 5).length,
+    within_10km: eligible.filter((r) => (r.distance_km ?? Infinity) <= 10).length,
+    riders: rows.sort((a, b) => (a.distance_km ?? Infinity) - (b.distance_km ?? Infinity)),
+  });
 });
 
 // ---- Refund / adjustment on completed order ----
