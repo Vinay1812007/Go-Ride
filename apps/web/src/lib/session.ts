@@ -7,7 +7,9 @@ import type { Profile } from './types';
 interface Session {
   loading: boolean;
   userId: string | null;
-  profile: Profile | null;
+  authEmail: string | null;   // from Supabase session (always available when signed in)
+  profile: Profile | null;    // from Worker /auth/me (may be null if API fails)
+  profileError: boolean;      // true if userId exists but /auth/me failed
   refresh: () => Promise<void>;
   signOut: () => Promise<void>;
 }
@@ -15,22 +17,28 @@ interface Session {
 export function useSession(): Session {
   const [loading, setLoading] = useState(true);
   const [userId, setUserId] = useState<string | null>(null);
+  const [authEmail, setAuthEmail] = useState<string | null>(null);
   const [profile, setProfile] = useState<Profile | null>(null);
+  const [profileError, setProfileError] = useState(false);
 
   const load = async () => {
     setLoading(true);
     const { data: { session } } = await supabase.auth.getSession();
     const uid = session?.user?.id ?? null;
     setUserId(uid);
+    setAuthEmail(session?.user?.email ?? null);
     if (uid) {
       try {
         const me = await api.get<{ profile: Profile }>('/auth/me');
         setProfile(me.profile);
+        setProfileError(false);
       } catch {
         setProfile(null);
+        setProfileError(true);
       }
     } else {
       setProfile(null);
+      setProfileError(false);
     }
     setLoading(false);
   };
@@ -45,12 +53,16 @@ export function useSession(): Session {
   return {
     loading,
     userId,
+    authEmail,
     profile,
+    profileError,
     refresh: load,
     async signOut() {
       await supabase.auth.signOut();
       setProfile(null);
       setUserId(null);
+      setAuthEmail(null);
+      setProfileError(false);
     },
   };
 }

@@ -23,9 +23,11 @@ function LoadingScreen() {
   );
 }
 
-function RoleMismatch({ target, role, onSignOut }: {
+function RoleMismatch({ target, role, email, profileMissing, onSignOut }: {
   target: Exclude<Target, undefined>;
   role: string;
+  email: string | null;
+  profileMissing: boolean;
   onSignOut: () => void;
 }) {
   const map = {
@@ -42,15 +44,28 @@ function RoleMismatch({ target, role, onSignOut }: {
 
   return (
     <div className="h-full grid place-items-center bg-surface-muted p-4">
-      <div className="max-w-sm card text-center">
+      <div className="max-w-md card text-center">
         <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-brand-500 grid place-items-center font-bold text-xl text-surface-strong">
           Go
         </div>
         <h1 className="text-lg font-bold mb-1">{info.title}</h1>
         <p className="text-sm text-slate-500 mb-4">{info.hint}</p>
+
+        {/* Diagnostic block — shows exactly which account is signed in */}
+        <div className="rounded-xl bg-surface-muted border border-surface-border p-3 text-left text-xs mb-4">
+          <div className="text-slate-500 uppercase tracking-wider text-[10px] mb-1">Signed in as</div>
+          <div className="font-mono break-all text-sm mb-2">{email ?? '(no email)'}</div>
+          <div className="text-slate-500 uppercase tracking-wider text-[10px] mb-1">Detected role</div>
+          <div className="font-mono text-sm">
+            {role}
+            {profileMissing && (
+              <span className="ml-2 text-amber-700">(profile not found — API returned 401)</span>
+            )}
+          </div>
+        </div>
+
         <p className="text-xs text-slate-500 mb-4">
-          You're signed in as a <span className="font-medium">{role}</span>.
-          {' '}You probably want{' '}
+          You probably want{' '}
           <a href={suggestUrl} className="underline">the {role} app</a>.
         </p>
         <button onClick={onSignOut} className="btn-ghost w-full">
@@ -62,7 +77,7 @@ function RoleMismatch({ target, role, onSignOut }: {
 }
 
 export default function App() {
-  const { loading, userId, profile, signOut } = useSession();
+  const { loading, userId, authEmail, profile, profileError, signOut } = useSession();
   const location = useLocation();
 
   // Public routes that don't require login
@@ -89,7 +104,7 @@ export default function App() {
   // ------------- Target-locked builds (Pages projects per role) -------------
   if (target === 'customer') {
     // Customer-only bundle; other roles are blocked with a friendly message.
-    if (role !== 'customer') return <RoleMismatch target="customer" role={role} onSignOut={signOut} />;
+    if (role !== 'customer') return <RoleMismatch target="customer" role={role} email={authEmail} profileMissing={profileError} onSignOut={signOut} />;
     return (
       <Routes>
         <Route path="/" element={<HomePage />} />
@@ -104,7 +119,7 @@ export default function App() {
   if (target === 'rider') {
     // Rider bundle — customers can sign in and onboard to become riders.
     // Admins are blocked (they should use the admin URL).
-    if (role === 'admin') return <RoleMismatch target="rider" role={role} onSignOut={signOut} />;
+    if (role === 'admin') return <RoleMismatch target="rider" role={role} email={authEmail} profileMissing={profileError} onSignOut={signOut} />;
     return (
       <Routes>
         <Route path="/captain/*" element={<CaptainShell />} />
@@ -115,7 +130,7 @@ export default function App() {
 
   if (target === 'admin') {
     // Admin-only bundle; strict.
-    if (role !== 'admin') return <RoleMismatch target="admin" role={role} onSignOut={signOut} />;
+    if (role !== 'admin') return <RoleMismatch target="admin" role={role} email={authEmail} profileMissing={profileError} onSignOut={signOut} />;
     return (
       <Routes>
         <Route path="/admin/*" element={<AdminShell />} />
