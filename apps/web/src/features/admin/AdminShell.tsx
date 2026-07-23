@@ -6,6 +6,7 @@ import { inr } from '@/lib/format';
 import RidersPage from './RidersPage';
 import OrdersPage from './OrdersPage';
 import RateCardsPage from './RateCardsPage';
+import LiveMapPage from './LiveMapPage';
 
 interface Stats { online_riders: number; active_orders: number; revenue_today: number }
 
@@ -34,6 +35,7 @@ function Dashboard() {
 export default function AdminShell() {
   const links = [
     { to: '/admin',            label: 'Dashboard' },
+    { to: '/admin/live-map',   label: 'Live map' },
     { to: '/admin/orders',     label: 'Orders' },
     { to: '/admin/riders',     label: 'Riders' },
     { to: '/admin/rate-cards', label: 'Rate cards' },
@@ -59,6 +61,7 @@ export default function AdminShell() {
       <main className="flex-1 overflow-y-auto">
         <Routes>
           <Route path="" element={<Dashboard />} />
+          <Route path="live-map" element={<LiveMapPage />} />
           <Route path="rate-cards" element={<RateCardsPage />} />
           <Route path="riders" element={<RidersPage />} />
           <Route path="orders" element={<OrdersPage />} />
