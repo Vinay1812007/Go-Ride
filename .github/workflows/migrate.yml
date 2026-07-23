@@ -23,6 +23,7 @@ on:
           - chat             # 0005
           - food             # 0006
           - promos-wallet    # 0007
+          - push-tokens      # 0008
           - seed-only        # seed.sql
 
 jobs:
@@ -62,6 +63,7 @@ jobs:
               run_sql supabase/migrations/0005_chat.sql
               run_sql supabase/migrations/0006_food.sql
               run_sql supabase/migrations/0007_promos_wallet.sql
+              run_sql supabase/migrations/0008_push_tokens.sql
               run_sql supabase/seed.sql
               ;;
             schema-only)     run_sql supabase/migrations/0001_init.sql ;;
@@ -71,6 +73,7 @@ jobs:
             chat)            run_sql supabase/migrations/0005_chat.sql ;;
             food)            run_sql supabase/migrations/0006_food.sql ;;
             promos-wallet)   run_sql supabase/migrations/0007_promos_wallet.sql ;;
+            push-tokens)     run_sql supabase/migrations/0008_push_tokens.sql ;;
             seed-only)       run_sql supabase/seed.sql ;;
           esac
 

@@ -2,6 +2,7 @@
 import { useEffect, useState } from 'react';
 import { supabase } from './supabase';
 import { api } from './api';
+import { initPush, revokePush } from './push';
 import type { Profile } from './types';
 
 interface Session {
@@ -32,6 +33,9 @@ export function useSession(): Session {
         const me = await api.get<{ profile: Profile }>('/auth/me');
         setProfile(me.profile);
         setProfileError(false);
+        // Kick off push registration once profile is confirmed. Runs at most
+        // once per browser thanks to the localStorage token-diff check inside.
+        void initPush();
       } catch {
         setProfile(null);
         setProfileError(true);
@@ -58,6 +62,9 @@ export function useSession(): Session {
     profileError,
     refresh: load,
     async signOut() {
+      // Unregister push before the session dies — token is user-scoped and
+      // shouldn't send notifications to a signed-out browser.
+      await revokePush().catch(() => {});
       await supabase.auth.signOut();
       setProfile(null);
       setUserId(null);

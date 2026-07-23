@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import type { AppEnv } from '../lib/env';
 import { requireAuth, requireRole } from '../lib/auth';
 import { admin, broadcast } from '../lib/supabase';
+import { sendToProfile } from '../lib/push';
 import { locationPingBody, startTripBody } from '../lib/schemas';
 import type { z } from 'zod';
 
@@ -61,7 +62,7 @@ rides.post('/:orderId/accept', requireAuth, requireRole('rider'), async (c) => {
     .update({ status: 'accepted', rider_id: uid, accepted_at: nowIso })
     .eq('id', orderId)
     .eq('status', 'searching')
-    .select('id, order_no')
+    .select('id, order_no, customer_id')
     .maybeSingle();
   if (!order) return c.json({ error: { code: 'gone', message: 'Order no longer available' } }, 409);
 
@@ -79,6 +80,16 @@ rides.post('/:orderId/accept', requireAuth, requireRole('rider'), async (c) => {
   await db.from('riders').update({ status: 'on_trip' }).eq('id', uid);
 
   await broadcast(c.env, `order:${orderId}`, 'status', { status: 'accepted', rider_id: uid });
+
+  // Push to customer — captain accepted.
+  c.executionCtx.waitUntil(
+    sendToProfile(c.env, order.customer_id, {
+      title: 'Captain on the way',
+      body: `A captain is heading to pickup for order ${order.order_no}`,
+      data: { order_id: orderId, kind: 'status', status: 'accepted' },
+      clickAction: `/track/${orderId}`,
+    }).catch(() => {}),
+  );
   return c.json({ ok: true, order });
 });
 
@@ -104,10 +115,21 @@ rides.post('/:orderId/arrived', requireAuth, requireRole('rider'), async (c) => 
     .eq('id', orderId)
     .eq('rider_id', uid)
     .eq('status', 'accepted')
-    .select('id')
+    .select('id, order_no, customer_id, otp')
     .maybeSingle();
   if (!data) return c.json({ error: { code: 'invalid_transition' } }, 409);
   await broadcast(c.env, `order:${orderId}`, 'status', { status: 'arrived' });
+
+  // Arrived push is high-value — customer needs to come out, share the OTP.
+  c.executionCtx.waitUntil(
+    sendToProfile(c.env, data.customer_id, {
+      title: 'Captain has arrived',
+      body: `Share OTP ${data.otp} to start the trip`,
+      data: { order_id: orderId, kind: 'status', status: 'arrived' },
+      clickAction: `/track/${orderId}`,
+    }).catch(() => {}),
+  );
+
   return c.json({ ok: true });
 });
 
@@ -165,6 +187,18 @@ rides.post('/:orderId/complete', requireAuth, requireRole('rider'), async (c) =>
   }
   await db.from('riders').update({ status: 'online' }).eq('id', uid);
   await broadcast(c.env, `order:${orderId}`, 'status', { status: nextStatus, fare_final: fareFinal });
+
+  // Push trip-complete notification to the customer.
+  c.executionCtx.waitUntil(
+    sendToProfile(c.env, order.customer_id, {
+      title: isParcel ? 'Delivered' : 'Trip completed',
+      body: isParcel
+        ? `Your parcel has been delivered. Fare ₹${fareFinal}.`
+        : `Thanks for riding! Fare ₹${fareFinal}. Tap to rate your captain.`,
+      data: { order_id: orderId, kind: 'status', status: nextStatus },
+      clickAction: `/track/${orderId}`,
+    }).catch(() => {}),
+  );
 
   // Referral bonus — if this is the customer's FIRST completed trip and they
   // have a referred_by set, credit both parties. Amounts are tunable.

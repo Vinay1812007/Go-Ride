@@ -74,8 +74,10 @@ jobs:
           SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
           SUPABASE_JWT_SECRET:       ${{ secrets.SUPABASE_JWT_SECRET }}
           SHARE_TOKEN_SECRET:        ${{ secrets.SHARE_TOKEN_SECRET }}
-          ORS_KEY:                   ${{ secrets.ORS_KEY }}
-          GEOCODER_KEY:              ${{ secrets.GEOCODER_KEY }}
+          ORS_KEY:                       ${{ secrets.ORS_KEY }}
+          GEOCODER_KEY:                  ${{ secrets.GEOCODER_KEY }}
+          FIREBASE_PROJECT_ID:           ${{ secrets.FIREBASE_PROJECT_ID }}
+          FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
         run: |
           set -e
           push() {
@@ -86,13 +88,15 @@ jobs:
               echo "↷ skipping empty $NAME"
             fi
           }
-          push SUPABASE_URL              "$SUPABASE_URL"
-          push SUPABASE_ANON_KEY         "$SUPABASE_ANON_KEY"
-          push SUPABASE_SERVICE_ROLE_KEY "$SUPABASE_SERVICE_ROLE_KEY"
-          push SUPABASE_JWT_SECRET       "$SUPABASE_JWT_SECRET"
-          push SHARE_TOKEN_SECRET        "$SHARE_TOKEN_SECRET"
-          push ORS_KEY                   "$ORS_KEY"
-          push GEOCODER_KEY              "$GEOCODER_KEY"
+          push SUPABASE_URL                  "$SUPABASE_URL"
+          push SUPABASE_ANON_KEY             "$SUPABASE_ANON_KEY"
+          push SUPABASE_SERVICE_ROLE_KEY     "$SUPABASE_SERVICE_ROLE_KEY"
+          push SUPABASE_JWT_SECRET           "$SUPABASE_JWT_SECRET"
+          push SHARE_TOKEN_SECRET            "$SHARE_TOKEN_SECRET"
+          push ORS_KEY                       "$ORS_KEY"
+          push GEOCODER_KEY                  "$GEOCODER_KEY"
+          push FIREBASE_PROJECT_ID           "$FIREBASE_PROJECT_ID"
+          push FIREBASE_SERVICE_ACCOUNT_JSON "$FIREBASE_SERVICE_ACCOUNT_JSON"
 
       - name: Deploy Worker
         working-directory: apps/api
@@ -142,14 +146,17 @@ jobs:
       - name: Build web (${{ matrix.target }})
         working-directory: apps/web
         env:
-          VITE_SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
-          VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-          VITE_API_URL:           ${{ needs.api.outputs.worker_url }}
-          VITE_APP_TARGET:        ${{ matrix.target }}
-          VITE_MAP_TILES_URL:     https://tiles.openfreemap.org/styles/liberty
-          VITE_DEFAULT_CITY:      Hyderabad
-          VITE_DEFAULT_LAT:       "17.3850"
-          VITE_DEFAULT_LNG:       "78.4867"
+          VITE_SUPABASE_URL:       ${{ secrets.SUPABASE_URL }}
+          VITE_SUPABASE_ANON_KEY:  ${{ secrets.SUPABASE_ANON_KEY }}
+          VITE_API_URL:            ${{ needs.api.outputs.worker_url }}
+          VITE_APP_TARGET:         ${{ matrix.target }}
+          VITE_MAP_TILES_URL:      https://tiles.openfreemap.org/styles/liberty
+          VITE_DEFAULT_CITY:       Hyderabad
+          VITE_DEFAULT_LAT:        "17.3850"
+          VITE_DEFAULT_LNG:        "78.4867"
+          # Firebase Cloud Messaging (optional — feature no-ops when absent)
+          VITE_FIREBASE_CONFIG:    ${{ secrets.VITE_FIREBASE_CONFIG }}
+          VITE_FIREBASE_VAPID_KEY: ${{ secrets.VITE_FIREBASE_VAPID_KEY }}
         run: npm run build
 
       - name: Ensure Pages project exists (${{ matrix.project }})

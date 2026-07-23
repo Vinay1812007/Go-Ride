@@ -27,6 +27,7 @@ import {
   promoErrorMessage,
   walletBalance,
 } from '../lib/promos';
+import { sendToProfile } from '../lib/push';
 import type { z } from 'zod';
 
 const orders = new Hono<AppEnv>();
@@ -348,6 +349,20 @@ orders.post('/:id/cancel', requireAuth, async (c) => {
       reason: nextStatus,
     });
   }
+
+  // Push to the party that DIDN'T cancel.
+  const notifyId = isCustomer ? order.rider_id : order.customer_id;
+  if (notifyId) {
+    c.executionCtx.waitUntil(
+      sendToProfile(c.env, notifyId, {
+        title: isCustomer ? 'Trip cancelled by customer' : 'Trip cancelled by captain',
+        body: body.reason || 'The trip has been cancelled.',
+        data: { order_id: order.id, kind: 'status', status: nextStatus },
+        clickAction: isCustomer ? '/captain' : `/track/${order.id}`,
+      }).catch(() => {}),
+    );
+  }
+
   return c.json({ ok: true, status: nextStatus });
 });
 
@@ -486,6 +501,15 @@ orders.post('/:id/messages', requireAuth, async (c) => {
     const otherChannel = isCustomer ? `rider:${otherId}` : `customer:${otherId}`;
     c.executionCtx.waitUntil(
       broadcast(c.env, otherChannel, 'message', { order_id: orderId, preview: inserted.body.slice(0, 80) }).catch(() => {}),
+    );
+    // Push notification so backgrounded apps get it too.
+    c.executionCtx.waitUntil(
+      sendToProfile(c.env, otherId, {
+        title: isCustomer ? 'Message from customer' : 'Message from captain',
+        body: inserted.body.slice(0, 200),
+        data: { order_id: orderId, kind: 'chat' },
+        clickAction: isCustomer ? `/captain/trip/${orderId}` : `/track/${orderId}`,
+      }).catch(() => {}),
     );
   }
 

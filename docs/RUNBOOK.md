@@ -681,10 +681,106 @@ Schema is in `supabase/migrations/0007_promos_wallet.sql` — apply via
 
 ---
 
-## 18. Phase 2 (not built yet)
+## 18. Push notifications (Firebase Cloud Messaging)
+
+Web-push delivery for backgrounded PWAs and Android APK (via Capacitor).
+Realtime is still the primary channel — push is a "wake up" nudge for
+apps that aren't in the foreground.
+
+### What sends a push
+
+| Trigger | Who gets it | Body |
+|---|---|---|
+| Dispatch fan-out (new offer) | Every candidate captain | "New ride request — Pickup X km away" |
+| Captain accepts | Customer | "Captain on the way" |
+| Captain marks arrived | Customer | "Captain has arrived — Share OTP XXXX" |
+| Trip completed / delivered | Customer | "Trip completed — Fare ₹NNN" |
+| Order cancelled by either party | The other party | "Trip cancelled — <reason>" |
+| Chat message | Recipient | Message preview (200 chars) |
+
+Each push carries `data.click_action` — the SW's `notificationclick`
+handler focuses or opens the right route in the PWA (`/track/<id>` for
+customers, `/captain/trip/<id>` for captains).
+
+### One-time Firebase setup
+
+1. **Firebase console → Add project.** Name it (e.g. `goride-prod`),
+   accept defaults.
+2. **Project settings → Cloud Messaging.** Nothing to configure here — it's
+   auto-enabled.
+3. **Project settings → Cloud Messaging → Web configuration → Generate
+   key pair.** Copy the VAPID public key.
+4. **Project settings → General → Your apps → Web (`</>` icon).** Register
+   a web app named "GoRide web". Copy the `firebaseConfig` object shown
+   after "SDK setup and configuration → Config" — paste it into GH secret
+   `VITE_FIREBASE_CONFIG` as a single-line JSON string.
+5. **Project settings → Service accounts → Generate new private key.**
+   Downloads a JSON. Paste the whole file contents into GH secret
+   `FIREBASE_SERVICE_ACCOUNT_JSON`.
+6. **Copy the project ID** from the Firebase console (e.g. `goride-prod-1a2b3`)
+   into GH secret `FIREBASE_PROJECT_ID`.
+
+### GH secrets to add
+
+| Secret | Where from | Which side |
+|---|---|---|
+| `VITE_FIREBASE_CONFIG` | Firebase → General → Web config (JSON) | Web build |
+| `VITE_FIREBASE_VAPID_KEY` | Firebase → Cloud Messaging → Web push cert | Web build |
+| `FIREBASE_PROJECT_ID` | Firebase console URL / General tab | Worker |
+| `FIREBASE_SERVICE_ACCOUNT_JSON` | Service accounts → JSON file contents | Worker |
+
+Then trigger **Deploy web + api** — the workflow will push the Worker
+secrets on that run and rebuild the web app with the Firebase config
+baked in. All four secrets are optional: if any are missing, that side
+no-ops (client never registers a token; Worker never sends). The feature
+is fully additive to Realtime.
+
+### How it works
+
+- **Migration 0008** adds `push_tokens(profile_id, token, platform,
+  user_agent, revoked_at)`.
+- Client: `apps/web/src/lib/push.ts` inits after sign-in confirms via
+  `/auth/me`. Requests notification permission (once, on first sign-in),
+  registers `/firebase-messaging-sw.js`, calls `getToken({ vapidKey })`,
+  POSTs to `/push/register`. Cached in `localStorage` so re-signing-in
+  isn't a fresh registration.
+- Server: `apps/api/src/lib/push.ts` mints an OAuth2 access token by
+  signing a JWT with the service account private key (RS256 via `jose`),
+  caches it in KV for 55 min, then hits the FCM HTTP v1
+  `messages:send` endpoint per token. On 404 or `UNREGISTERED` it flips
+  `revoked_at` so future sends skip that token.
+- Vite plugin (`vite.config.ts`) emits `firebase-messaging-sw-config.js`
+  at build time from `VITE_FIREBASE_CONFIG`, which the SW `importScripts`.
+  Without the env var, the SW loads harmlessly and never fires.
+- `revokePush()` runs on sign-out — user-scoped tokens shouldn't send to
+  a browser whose owner has changed.
+
+### Testing
+
+1. Deploy with all four secrets set.
+2. Sign in as customer on Chrome desktop or Android.
+3. Grant notification permission when prompted.
+4. Book a ride and use a demo captain (Admin → Load demo data) to accept
+   it — the "Captain on the way" push should fire.
+5. Watch Cloudflare → Workers → your Worker → Logs for `FCM send failed`
+   entries if it's silent.
+
+Schema is in `supabase/migrations/0008_push_tokens.sql` — apply via
+**Actions → Apply Supabase migrations → target: push-tokens** (or `all`).
+
+### iOS caveats
+
+iOS Safari supports Web Push only from installed PWAs on iOS 16.4+. The
+`InstallPrompt` component nudges users to install; once installed, push
+works. Native APK on iOS requires an Apple Developer account and APNs
+certificate — not built yet.
+
+---
+
+## 19. Phase 2 (not built yet)
 
 - Self-hosted OSRM on Fly.io free tier.
-- Push notifications (Capacitor + FCM).
 - Admin wallet-credit page (endpoints exist — §17).
+- Code-splitting for the web bundle (~540 kB main chunk → could halve).
 
 None of these require schema migration beyond adding a column or two.

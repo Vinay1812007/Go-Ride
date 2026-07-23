@@ -14,6 +14,7 @@ import tracking from './routes/tracking';
 import geo from './routes/geo';
 import food from './routes/food';
 import wallet, { promo } from './routes/wallet';
+import push from './routes/push';
 import { admin as sbAdmin } from './lib/supabase';
 
 const app = new Hono<AppEnv>();
@@ -38,6 +39,7 @@ app.route('/partner/v1', partner);
 app.route('/food', food);
 app.route('/promo', promo);
 app.route('/wallet', wallet);
+app.route('/push', push);
 app.route('/t', tracking);
 
 app.onError((err, c) => {

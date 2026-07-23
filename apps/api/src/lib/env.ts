@@ -19,6 +19,12 @@ export interface Env {
   SHARE_TOKEN_SECRET: string;
   ORS_KEY?: string;
   GEOCODER_KEY?: string;
+  // Firebase Cloud Messaging (optional — feature no-ops when absent)
+  // FIREBASE_PROJECT_ID: e.g. "goride-app"
+  // FIREBASE_SERVICE_ACCOUNT_JSON: whole downloaded service-account JSON
+  //   as a single string secret.
+  FIREBASE_PROJECT_ID?: string;
+  FIREBASE_SERVICE_ACCOUNT_JSON?: string;
 }
 
 // Hono ContextVariableMap — populated by middleware, read by handlers.

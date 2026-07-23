@@ -2,6 +2,7 @@
 import type { Env } from './env';
 import { admin, broadcast } from './supabase';
 import { haversineKm } from './geo';
+import { sendToProfile } from './push';
 
 // Bike/scooter customers accept scooter riders and vice-versa. Cabs & autos strict.
 export function candidateVehicles(service: string): string[] {
@@ -112,6 +113,19 @@ export async function dispatch(
       }),
     ),
   );
+
+  // Push notification fan-out — for captains who have the app backgrounded.
+  // Realtime is the primary channel; push is a "wake up" nudge. Fire-and-
+  // forget so a slow FCM call doesn't stall dispatch.
+  Promise.all(
+    ranked.map((r) => sendToProfile(env, r.id, {
+      title: 'New ride request',
+      body: `Pickup ${r.d.toFixed(1)} km away · tap to accept`,
+      data: { order_id: orderId, kind: 'offer' },
+      clickAction: `/captain/trip/${orderId}`,
+    })),
+  ).catch((e) => console.warn('offer push', e));
+
   return ranked.length;
 }
 
