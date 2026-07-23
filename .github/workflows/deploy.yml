@@ -116,10 +116,20 @@ jobs:
           echo "✅ Worker: $URL"
           echo "url=$URL" >> "$GITHUB_OUTPUT"
 
-  # -------------------- Cloudflare Pages (web) --------------------
+  # -------------------- Cloudflare Pages (web × 3 targets) --------------------
   web:
     needs: api
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: customer
+            project: goride-web       # → https://goride-web.pages.dev
+          - target: rider
+            project: goride-captain   # → https://goride-captain.pages.dev
+          - target: admin
+            project: goride-admin     # → https://goride-admin.pages.dev
     steps:
       - uses: actions/checkout@v4
 
@@ -129,42 +139,41 @@ jobs:
       - name: Install
         run: npm ci
 
-      - name: Build web
+      - name: Build web (${{ matrix.target }})
         working-directory: apps/web
         env:
           VITE_SUPABASE_URL:      ${{ secrets.SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
           VITE_API_URL:           ${{ needs.api.outputs.worker_url }}
-          VITE_APP_TARGET:        customer
+          VITE_APP_TARGET:        ${{ matrix.target }}
           VITE_MAP_TILES_URL:     https://tiles.openfreemap.org/styles/liberty
           VITE_DEFAULT_CITY:      Hyderabad
           VITE_DEFAULT_LAT:       "17.3850"
           VITE_DEFAULT_LNG:       "78.4867"
         run: npm run build
 
-      - name: Ensure Pages project exists
+      - name: Ensure Pages project exists (${{ matrix.project }})
         env:
           CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          PROJECT: ${{ matrix.project }}
         run: |
           set -e
-          # Create if not exists (ignore "already exists" errors)
-          npx wrangler pages project create goride-web --production-branch main 2>&1 | tee /tmp/pages.log \
+          npx wrangler pages project create "$PROJECT" --production-branch main 2>&1 | tee /tmp/pages.log \
             || grep -q "already exists\|already been created" /tmp/pages.log
 
-      - name: Deploy to Cloudflare Pages
+      - name: Deploy to Cloudflare Pages (${{ matrix.project }})
         working-directory: apps/web
         env:
           CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           npx wrangler pages deploy dist \
-            --project-name=goride-web \
+            --project-name=${{ matrix.project }} \
             --branch=main \
             --commit-hash=${{ github.sha }} \
             --commit-message="${{ github.event.head_commit.message }}"
 
-      - name: Print URLs
+      - name: Print URL
         run: |
-          echo "🚀 Worker: ${{ needs.api.outputs.worker_url }}"
-          echo "🚀 Pages:  https://goride-web.pages.dev"
+          echo "🚀 ${{ matrix.target }} → https://${{ matrix.project }}.pages.dev"

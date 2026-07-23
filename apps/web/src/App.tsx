@@ -10,6 +10,8 @@ import CaptainShell from './features/rider/CaptainShell';
 import AdminShell from './features/admin/AdminShell';
 import DevelopersPage from './features/developers/DevelopersPage';
 
+type Target = 'customer' | 'rider' | 'admin' | undefined;
+
 function LoadingScreen() {
   return (
     <div className="h-full grid place-items-center bg-white">
@@ -21,53 +23,133 @@ function LoadingScreen() {
   );
 }
 
+function RoleMismatch({ target, role, onSignOut }: {
+  target: Exclude<Target, undefined>;
+  role: string;
+  onSignOut: () => void;
+}) {
+  const map = {
+    customer: { title: 'This is the passenger app', hint: 'Use the correct URL for your role.' },
+    rider:    { title: 'This is the Captain app',   hint: 'Riders only. Sign out to switch accounts.' },
+    admin:    { title: 'This is the Admin console', hint: 'Admins only. Contact your team lead if you need access.' },
+  };
+  const info = map[target];
+  const suggestUrl = role === 'admin'
+    ? 'https://goride-admin.pages.dev'
+    : role === 'rider'
+      ? 'https://goride-captain.pages.dev'
+      : 'https://goride-web.pages.dev';
+
+  return (
+    <div className="h-full grid place-items-center bg-surface-muted p-4">
+      <div className="max-w-sm card text-center">
+        <div className="mx-auto mb-3 h-12 w-12 rounded-2xl bg-brand-500 grid place-items-center font-bold text-xl text-surface-strong">
+          Go
+        </div>
+        <h1 className="text-lg font-bold mb-1">{info.title}</h1>
+        <p className="text-sm text-slate-500 mb-4">{info.hint}</p>
+        <p className="text-xs text-slate-500 mb-4">
+          You're signed in as a <span className="font-medium">{role}</span>.
+          {' '}You probably want{' '}
+          <a href={suggestUrl} className="underline">the {role} app</a>.
+        </p>
+        <button onClick={onSignOut} className="btn-ghost w-full">
+          Sign out
+        </button>
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
-  const { loading, userId, profile } = useSession();
+  const { loading, userId, profile, signOut } = useSession();
   const location = useLocation();
 
-  // Public routes that don't require login.
+  // Public routes that don't require login
   const publicPath = location.pathname.startsWith('/t/') || location.pathname === '/developers';
 
   if (loading) return <LoadingScreen />;
-  if (!userId && !publicPath) {
-    return <AuthPage />;
+
+  // Public: /t/:orderNo and /developers accessible on every target
+  if (publicPath) {
+    return (
+      <Routes>
+        <Route path="/t/:orderNo" element={<PublicTrackPage />} />
+        <Route path="/developers" element={<DevelopersPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    );
   }
 
-  const target = import.meta.env.VITE_APP_TARGET;
+  if (!userId) return <AuthPage />;
 
-  // In production the APK has VITE_APP_TARGET locked; on web we route by role.
+  const target = import.meta.env.VITE_APP_TARGET as Target;
   const role = profile?.role ?? 'customer';
 
+  // ------------- Target-locked builds (Pages projects per role) -------------
+  if (target === 'customer') {
+    // Customer-only bundle; other roles are blocked with a friendly message.
+    if (role !== 'customer') return <RoleMismatch target="customer" role={role} onSignOut={signOut} />;
+    return (
+      <Routes>
+        <Route path="/" element={<HomePage />} />
+        <Route path="/order/:id" element={<OrderPage />} />
+        <Route path="/track/:id" element={<TrackingPage />} />
+        <Route path="/history" element={<HistoryPage />} />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    );
+  }
+
+  if (target === 'rider') {
+    // Rider bundle — customers can sign in and onboard to become riders.
+    // Admins are blocked (they should use the admin URL).
+    if (role === 'admin') return <RoleMismatch target="rider" role={role} onSignOut={signOut} />;
+    return (
+      <Routes>
+        <Route path="/captain/*" element={<CaptainShell />} />
+        <Route path="*" element={<Navigate to="/captain" replace />} />
+      </Routes>
+    );
+  }
+
+  if (target === 'admin') {
+    // Admin-only bundle; strict.
+    if (role !== 'admin') return <RoleMismatch target="admin" role={role} onSignOut={signOut} />;
+    return (
+      <Routes>
+        <Route path="/admin/*" element={<AdminShell />} />
+        <Route path="*" element={<Navigate to="/admin" replace />} />
+      </Routes>
+    );
+  }
+
+  // ------------- No target set: dynamic role-based routing -------------
+  if (role === 'admin') {
+    return (
+      <Routes>
+        <Route path="/admin/*" element={<AdminShell />} />
+        <Route path="/captain/*" element={<CaptainShell />} />
+        <Route path="*" element={<Navigate to="/admin" replace />} />
+      </Routes>
+    );
+  }
+  if (role === 'rider') {
+    return (
+      <Routes>
+        <Route path="/captain/*" element={<CaptainShell />} />
+        <Route path="*" element={<Navigate to="/captain" replace />} />
+      </Routes>
+    );
+  }
+  // Customer default
   return (
     <Routes>
-      {/* Public */}
-      <Route path="/t/:orderNo" element={<PublicTrackPage />} />
-      <Route path="/developers" element={<DevelopersPage />} />
-
-      {/* Customer */}
-      {(target === 'customer' || target == null) && role === 'customer' && (
-        <>
-          <Route path="/" element={<HomePage />} />
-          <Route path="/order/:id" element={<OrderPage />} />
-          <Route path="/track/:id" element={<TrackingPage />} />
-          <Route path="/history" element={<HistoryPage />} />
-        </>
-      )}
-
-      {/* Rider — /captain/* is available to any signed-in user so a customer can onboard */}
+      <Route path="/" element={<HomePage />} />
+      <Route path="/order/:id" element={<OrderPage />} />
+      <Route path="/track/:id" element={<TrackingPage />} />
+      <Route path="/history" element={<HistoryPage />} />
       <Route path="/captain/*" element={<CaptainShell />} />
-      {role === 'rider' && target !== 'admin' && (
-        <Route path="/" element={<Navigate to="/captain" replace />} />
-      )}
-
-      {/* Admin */}
-      {(target === 'admin' || role === 'admin') && (
-        <Route path="/admin/*" element={<AdminShell />} />
-      )}
-      {role === 'admin' && target !== 'rider' && (
-        <Route path="/" element={<Navigate to="/admin" replace />} />
-      )}
-
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );
