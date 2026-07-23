@@ -4,16 +4,19 @@
 // are missing, so a deployment without Firebase configured behaves exactly
 // like the pre-push app.
 //
+// The firebase SDKs are dynamic-imported inside initPush() so the ~100 kB
+// firebase/messaging chunk only loads when we actually need to register a
+// token (i.e. after sign-in confirms and permission is granted). This
+// keeps the first-paint bundle clean for anonymous visitors.
+//
 // Order of operations on the client:
 //   1. Detect support (secure context, Notification API, ServiceWorker, PushManager)
 //   2. Request Notification permission (only if 'default' — never re-prompt after a deny)
-//   3. Init firebase-app + firebase-messaging
+//   3. Dynamic-import + init firebase-app + firebase-messaging
 //   4. Register the service worker at /firebase-messaging-sw.js
 //   5. getToken({ vapidKey, serviceWorkerRegistration }) → POST /push/register
 //   6. onMessage — foreground listener that shows a small toast (background is
 //      handled by the SW showing a native notification)
-import { initializeApp, type FirebaseApp } from 'firebase/app';
-import { getMessaging, getToken, onMessage, type Messaging } from 'firebase/messaging';
 import { api } from './api';
 
 interface PushConfig {
@@ -43,6 +46,10 @@ function pushSupported(): boolean {
   );
 }
 
+// Types-only, so tsc erases them; the real modules load dynamically inside initPush.
+type FirebaseApp = import('firebase/app').FirebaseApp;
+type Messaging = import('firebase/messaging').Messaging;
+
 let app: FirebaseApp | null = null;
 let messaging: Messaging | null = null;
 let currentToken: string | null = null;
@@ -71,6 +78,12 @@ export async function initPush(): Promise<void> {
   if (Notification.permission !== 'granted') return;
 
   try {
+    // Dynamic-import defers the ~100 kB firebase/messaging chunk until we
+    // actually need to register a token.
+    const [{ initializeApp }, { getMessaging, getToken, onMessage }] = await Promise.all([
+      import('firebase/app'),
+      import('firebase/messaging'),
+    ]);
     app ??= initializeApp(config.firebaseConfig);
     messaging ??= getMessaging(app);
 
@@ -100,7 +113,7 @@ export async function initPush(): Promise<void> {
     // Foreground handler — when the app has focus, notifications come here
     // rather than through the SW. Show a mild toast; the SW's showNotification
     // handles the background case.
-    onMessage(messaging, (payload) => {
+    onMessage(messaging!, (payload) => {
       const title = payload.notification?.title;
       if (!title) return;
       // Emit a custom event so any Toast provider can render it.

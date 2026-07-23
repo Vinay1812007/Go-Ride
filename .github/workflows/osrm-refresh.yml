@@ -1,0 +1,43 @@
+name: Refresh OSRM map data
+
+# OSM extracts change daily; re-run OSRM extract / partition / customize
+# monthly to keep routing quality current. Skipped until FLY_API_TOKEN is
+# set — the workflow gracefully no-ops if the secret is empty.
+#
+# Manually trigger with Actions → Refresh OSRM map data → Run workflow.
+# Otherwise fires 03:15 UTC on the 1st of each month.
+
+on:
+  schedule:
+    - cron: '15 3 1 * *'
+  workflow_dispatch:
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check for FLY_API_TOKEN
+        id: check
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "↷ FLY_API_TOKEN not set — skipping refresh."
+            echo "   Set it via: fly tokens create deploy → GH secret."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install flyctl
+        if: steps.check.outputs.skip == 'false'
+        run: curl -L https://fly.io/install.sh | sh
+
+      - name: Redeploy OSRM (no-cache pulls a fresh PBF)
+        if: steps.check.outputs.skip == 'false'
+        working-directory: infra/osrm
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: ~/.fly/bin/flyctl deploy --no-cache --remote-only

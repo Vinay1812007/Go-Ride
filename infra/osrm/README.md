@@ -31,15 +31,25 @@ fly status
 
 ## Wire it into the Worker
 
-1. On the Worker side, edit `apps/api/wrangler.toml`:
+Two ways:
+
+**Option A — Via GH secret (recommended, no committed URL):**
+1. GH → Settings → Secrets and variables → Actions → New repository secret:
+   - `OSRM_URL_OVERRIDE` = `https://goride-osrm.fly.dev`
+2. Run **Actions → Deploy web + api → Run workflow**. The deploy workflow
+   patches `wrangler.toml` in-flight so nothing about the URL is committed
+   to git.
+
+**Option B — Edit committed config:**
+1. Edit `apps/api/wrangler.toml`:
    ```toml
    [vars]
    OSRM_URL = "https://goride-osrm.fly.dev"
    ROUTER   = "osrm"
    ```
-2. Re-deploy the Worker (**Actions → Deploy web + api → Run workflow**).
+2. Push. GH Actions redeploys the Worker automatically.
 
-That's it. Route requests will now hit your instance instead of the
+Either way, route requests will now hit your instance instead of the
 public demo.
 
 ## Verify
@@ -110,6 +120,7 @@ stage always downloads the latest PBF:
 fly deploy --no-cache
 ```
 
-For automated refreshes, add a monthly cron to `.github/workflows/` that
-runs `flyctl deploy --no-cache` — needs a `FLY_API_TOKEN` GH secret from
-`fly tokens create deploy`.
+For automated refreshes, the repo ships `.github/workflows/osrm-refresh.yml`
+which runs on the 1st of each month (and can be triggered manually).
+It's gated on a `FLY_API_TOKEN` GH secret from `fly tokens create deploy` —
+skips gracefully if the secret is empty.

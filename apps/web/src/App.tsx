@@ -1,21 +1,44 @@
+import { lazy, Suspense } from 'react';
 import { Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import { useSession } from './lib/session';
 import AuthPage from './features/auth/AuthPage';
 import HomePage from './features/customer/HomePage';
-import OrderPage from './features/customer/OrderPage';
-import TrackingPage from './features/customer/TrackingPage';
-import HistoryPage from './features/customer/HistoryPage';
-import PublicTrackPage from './features/customer/PublicTrackPage';
-import FoodBrowsePage from './features/customer/FoodBrowsePage';
-import RestaurantPage from './features/customer/RestaurantPage';
-import FoodCheckoutPage from './features/customer/FoodCheckoutPage';
-import WalletPage from './features/customer/WalletPage';
-import CaptainShell from './features/rider/CaptainShell';
-import AdminShell from './features/admin/AdminShell';
-import DevelopersPage from './features/developers/DevelopersPage';
 import LoadingScreen from './components/ui/LoadingScreen';
 
+// ── Lazy chunks ──────────────────────────────────────────────────────────
+// Every page below is only reachable from a specific route, so we split
+// them out of the main bundle. First-paint routes (HomePage, AuthPage)
+// stay eager so the login / home experience never shows a spinner-on-load.
+//
+// Grouping notes:
+//   • Admin: one big chunk (all admin pages share so much layout that
+//     splitting them further just adds spinner-on-tab-switch pain).
+//   • Rider: CaptainShell owns its own children (OfferCard, TripPage,
+//     OnboardPage) as internal imports, so lazily loading the shell
+//     splits the whole rider experience.
+//   • Food: three routes, split as one chunk since a customer entering
+//     the food flow is likely to open several restaurants.
+//   • DevelopersPage: content-heavy public doc, not needed for anyone
+//     signed in.
+const OrderPage        = lazy(() => import('./features/customer/OrderPage'));
+const TrackingPage     = lazy(() => import('./features/customer/TrackingPage'));
+const HistoryPage      = lazy(() => import('./features/customer/HistoryPage'));
+const PublicTrackPage  = lazy(() => import('./features/customer/PublicTrackPage'));
+const FoodBrowsePage   = lazy(() => import('./features/customer/FoodBrowsePage'));
+const RestaurantPage   = lazy(() => import('./features/customer/RestaurantPage'));
+const FoodCheckoutPage = lazy(() => import('./features/customer/FoodCheckoutPage'));
+const WalletPage       = lazy(() => import('./features/customer/WalletPage'));
+const CaptainShell     = lazy(() => import('./features/rider/CaptainShell'));
+const AdminShell       = lazy(() => import('./features/admin/AdminShell'));
+const DevelopersPage   = lazy(() => import('./features/developers/DevelopersPage'));
+
 type Target = 'customer' | 'rider' | 'admin' | undefined;
+
+// Wraps a Routes block so lazy-loaded pages get a graceful loading state
+// instead of a blank screen while their chunk fetches.
+function Suspended({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<LoadingScreen />}>{children}</Suspense>;
+}
 
 function RoleMismatch({ target, role, email, profileMissing, onSignOut }: {
   target: Exclude<Target, undefined>;
@@ -82,11 +105,13 @@ export default function App() {
   // Public: /t/:orderNo and /developers accessible on every target
   if (publicPath) {
     return (
-      <Routes>
-        <Route path="/t/:orderNo" element={<PublicTrackPage />} />
-        <Route path="/developers" element={<DevelopersPage />} />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
+      <Suspended>
+        <Routes>
+          <Route path="/t/:orderNo" element={<PublicTrackPage />} />
+          <Route path="/developers" element={<DevelopersPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspended>
     );
   }
 
@@ -100,6 +125,74 @@ export default function App() {
     // Customer-only bundle; other roles are blocked with a friendly message.
     if (role !== 'customer') return <RoleMismatch target="customer" role={role} email={authEmail} profileMissing={profileError} onSignOut={signOut} />;
     return (
+      <Suspended>
+        <Routes>
+          <Route path="/" element={<HomePage />} />
+          <Route path="/order/:id" element={<OrderPage />} />
+          <Route path="/track/:id" element={<TrackingPage />} />
+          <Route path="/history" element={<HistoryPage />} />
+          <Route path="/food" element={<FoodBrowsePage />} />
+          <Route path="/food/checkout" element={<FoodCheckoutPage />} />
+          <Route path="/food/:restaurantId" element={<RestaurantPage />} />
+          <Route path="/wallet" element={<WalletPage />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </Suspended>
+    );
+  }
+
+  if (target === 'rider') {
+    // Rider bundle — customers can sign in and onboard to become riders.
+    // Admins are blocked (they should use the admin URL).
+    if (role === 'admin') return <RoleMismatch target="rider" role={role} email={authEmail} profileMissing={profileError} onSignOut={signOut} />;
+    return (
+      <Suspended>
+        <Routes>
+          <Route path="/captain/*" element={<CaptainShell />} />
+          <Route path="*" element={<Navigate to="/captain" replace />} />
+        </Routes>
+      </Suspended>
+    );
+  }
+
+  if (target === 'admin') {
+    // Admin-only bundle; strict.
+    if (role !== 'admin') return <RoleMismatch target="admin" role={role} email={authEmail} profileMissing={profileError} onSignOut={signOut} />;
+    return (
+      <Suspended>
+        <Routes>
+          <Route path="/admin/*" element={<AdminShell />} />
+          <Route path="*" element={<Navigate to="/admin" replace />} />
+        </Routes>
+      </Suspended>
+    );
+  }
+
+  // ------------- No target set: dynamic role-based routing -------------
+  if (role === 'admin') {
+    return (
+      <Suspended>
+        <Routes>
+          <Route path="/admin/*" element={<AdminShell />} />
+          <Route path="/captain/*" element={<CaptainShell />} />
+          <Route path="*" element={<Navigate to="/admin" replace />} />
+        </Routes>
+      </Suspended>
+    );
+  }
+  if (role === 'rider') {
+    return (
+      <Suspended>
+        <Routes>
+          <Route path="/captain/*" element={<CaptainShell />} />
+          <Route path="*" element={<Navigate to="/captain" replace />} />
+        </Routes>
+      </Suspended>
+    );
+  }
+  // Customer default
+  return (
+    <Suspended>
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/order/:id" element={<OrderPage />} />
@@ -109,65 +202,9 @@ export default function App() {
         <Route path="/food/checkout" element={<FoodCheckoutPage />} />
         <Route path="/food/:restaurantId" element={<RestaurantPage />} />
         <Route path="/wallet" element={<WalletPage />} />
+        <Route path="/captain/*" element={<CaptainShell />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
-    );
-  }
-
-  if (target === 'rider') {
-    // Rider bundle — customers can sign in and onboard to become riders.
-    // Admins are blocked (they should use the admin URL).
-    if (role === 'admin') return <RoleMismatch target="rider" role={role} email={authEmail} profileMissing={profileError} onSignOut={signOut} />;
-    return (
-      <Routes>
-        <Route path="/captain/*" element={<CaptainShell />} />
-        <Route path="*" element={<Navigate to="/captain" replace />} />
-      </Routes>
-    );
-  }
-
-  if (target === 'admin') {
-    // Admin-only bundle; strict.
-    if (role !== 'admin') return <RoleMismatch target="admin" role={role} email={authEmail} profileMissing={profileError} onSignOut={signOut} />;
-    return (
-      <Routes>
-        <Route path="/admin/*" element={<AdminShell />} />
-        <Route path="*" element={<Navigate to="/admin" replace />} />
-      </Routes>
-    );
-  }
-
-  // ------------- No target set: dynamic role-based routing -------------
-  if (role === 'admin') {
-    return (
-      <Routes>
-        <Route path="/admin/*" element={<AdminShell />} />
-        <Route path="/captain/*" element={<CaptainShell />} />
-        <Route path="*" element={<Navigate to="/admin" replace />} />
-      </Routes>
-    );
-  }
-  if (role === 'rider') {
-    return (
-      <Routes>
-        <Route path="/captain/*" element={<CaptainShell />} />
-        <Route path="*" element={<Navigate to="/captain" replace />} />
-      </Routes>
-    );
-  }
-  // Customer default
-  return (
-    <Routes>
-      <Route path="/" element={<HomePage />} />
-      <Route path="/order/:id" element={<OrderPage />} />
-      <Route path="/track/:id" element={<TrackingPage />} />
-      <Route path="/history" element={<HistoryPage />} />
-      <Route path="/food" element={<FoodBrowsePage />} />
-      <Route path="/food/checkout" element={<FoodCheckoutPage />} />
-      <Route path="/food/:restaurantId" element={<RestaurantPage />} />
-      <Route path="/wallet" element={<WalletPage />} />
-      <Route path="/captain/*" element={<CaptainShell />} />
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+    </Suspended>
   );
 }

@@ -64,6 +64,28 @@ jobs:
           sed -i "s/REPLACE_WITH_KV_ID/$ID/g" wrangler.toml
           grep -A1 '\[\[kv_namespaces\]\]' wrangler.toml
 
+      - name: Override OSRM_URL / ROUTER from secrets (if set)
+        working-directory: apps/api
+        env:
+          # OSRM_URL_OVERRIDE:  e.g. https://goride-osrm.fly.dev — leave unset to keep the public demo
+          # ROUTER_OVERRIDE:    'osrm' | 'ors' — leave unset to keep 'osrm'
+          OSRM_URL_OVERRIDE: ${{ secrets.OSRM_URL_OVERRIDE }}
+          ROUTER_OVERRIDE:   ${{ secrets.ROUTER_OVERRIDE }}
+        run: |
+          set -e
+          if [ -n "$OSRM_URL_OVERRIDE" ]; then
+            echo "→ Overriding OSRM_URL from secret"
+            # Escape ampersands + slashes for sed
+            ESCAPED=$(printf '%s' "$OSRM_URL_OVERRIDE" | sed -e 's/[\/&]/\\&/g')
+            sed -i "s|^OSRM_URL = .*|OSRM_URL = \"$ESCAPED\"|" wrangler.toml
+            grep '^OSRM_URL' wrangler.toml
+          fi
+          if [ -n "$ROUTER_OVERRIDE" ]; then
+            echo "→ Overriding ROUTER from secret"
+            sed -i "s|^ROUTER = .*|ROUTER = \"$ROUTER_OVERRIDE\"|" wrangler.toml
+            grep '^ROUTER' wrangler.toml
+          fi
+
       - name: Push Worker secrets
         working-directory: apps/api
         env:

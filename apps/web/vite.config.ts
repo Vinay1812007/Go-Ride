@@ -46,9 +46,16 @@ export default defineConfig({
     sourcemap: false,
     rollupOptions: {
       output: {
-        manualChunks: {
-          maplibre: ['maplibre-gl'],
-          react: ['react', 'react-dom', 'react-router-dom'],
+        manualChunks(id: string) {
+          // Route-level lazy chunks are handled by React.lazy in App.tsx;
+          // these manualChunks separate the big npm vendors so their
+          // cache-lifetime is independent of app code changes.
+          if (id.includes('node_modules')) {
+            if (id.includes('maplibre-gl'))                    return 'maplibre';
+            if (id.includes('firebase') || id.includes('@firebase')) return 'firebase';
+            if (id.includes('@supabase'))                      return 'supabase';
+            if (id.includes('react-router') || id.includes('react-dom') || (id.includes('/react/') && !id.includes('react-router'))) return 'react';
+          }
         },
       },
     },

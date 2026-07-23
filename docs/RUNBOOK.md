@@ -874,9 +874,79 @@ For automation, add a monthly GH Actions cron that runs
 
 ---
 
-## 21. Phase 2 (not built yet)
+## 21. Code-splitting
 
-- Code-splitting for the web bundle (~540 kB main chunk → could halve).
+Route-level lazy loading dramatically cuts first-paint bundle size:
 
-Nothing else on the roadmap I've been tracking. Say what you want to
-tackle next.
+- **Before:** main chunk ~544 kB (134 kB gz) — everything in one file.
+- **After:** main chunk ~76 kB (25 kB gz). Every route is its own chunk
+  (4–80 kB each) and only downloads when navigated to.
+
+Chunks now emitted by the build:
+
+| Chunk | Raw | gzip | Loads when |
+|---|---|---|---|
+| index (app shell + HomePage + AuthPage) | 76 kB | 25 kB | First paint |
+| react vendor | 165 kB | 54 kB | First paint (cache-friendly) |
+| supabase vendor | 216 kB | 56 kB | First paint (auth needs it) |
+| firebase vendor | 98 kB | 18 kB | After sign-in only |
+| maplibre vendor | 802 kB | 218 kB | First map render only |
+| AdminShell (all admin pages) | 81 kB | 18 kB | Admin login only |
+| CaptainShell | 23 kB | 7 kB | Captain login only |
+| DevelopersPage | 19 kB | 6 kB | `/developers` visit only |
+| OrderPage / TrackingPage / HistoryPage / FoodBrowsePage / RestaurantPage / FoodCheckoutPage / WalletPage / PublicTrackPage | 4–9 kB each | 2–3 kB each | Per-route navigation |
+
+Implementation: `App.tsx` uses `React.lazy(() => import(...))` for
+every non-first-paint route, wrapped in a `<Suspense>` boundary with
+the existing `LoadingScreen` fallback. `vite.config.ts` `manualChunks`
+groups `firebase`, `supabase`, `react-*`, and `maplibre-gl` into their
+own vendor chunks so they cache independently of app code changes.
+
+Firebase Cloud Messaging is dynamic-imported inside `initPush()` —
+the firebase chunk only downloads once a signed-in user hits the push
+registration path, keeping the anonymous first-paint bundle clean.
+
+---
+
+## 22. OSRM_URL override via secret
+
+The deploy workflow reads two optional GH secrets that patch
+`wrangler.toml` in-flight:
+
+- `OSRM_URL_OVERRIDE` — e.g. `https://goride-osrm.fly.dev`
+- `ROUTER_OVERRIDE` — `osrm` or `ors`
+
+Set either in Repo → Settings → Secrets → Actions. When set, the deploy
+step rewrites the corresponding line in `wrangler.toml` before
+`wrangler deploy`. Nothing is committed to git. Leave empty to keep the
+public demo defaults.
+
+Same pattern is available for pointing at the self-hosted OSRM (§20)
+without editing committed files.
+
+---
+
+## 23. OSRM monthly refresh
+
+`.github/workflows/osrm-refresh.yml` runs on the 1st of each month at
+03:15 UTC (and manually via workflow_dispatch). It calls
+`flyctl deploy --no-cache --remote-only` inside `infra/osrm/`, which
+pulls a fresh Geofabrik PBF and re-runs the OSRM pipeline.
+
+Gated on `FLY_API_TOKEN` GH secret (get one via
+`fly tokens create deploy`). If unset, the workflow no-ops with a
+friendly log message — safe to have merged before OSRM is deployed.
+
+---
+
+## 24. Phase 3 (not built)
+
+Nothing else on the roadmap I've been tracking. Ideas for later:
+
+- Native iOS APK (needs Apple Developer account + APNs cert).
+- Multi-city rate cards + service area polygons.
+- Driver earnings dashboard (weekly/monthly summaries).
+- Restaurant partner portal (their own admin login).
+- Playwright end-to-end tests for the critical flows.
+
+Say what you want to tackle next.
