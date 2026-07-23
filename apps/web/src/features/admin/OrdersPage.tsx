@@ -3,6 +3,10 @@ import { useEffect, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { inr, serviceLabel, statusLabel } from '@/lib/format';
 import type { OrderStatus, ServiceType } from '@/lib/types';
+import Skeleton from '@/components/ui/Skeleton';
+import EmptyState from '@/components/ui/EmptyState';
+import Spinner from '@/components/ui/Spinner';
+import { useToast } from '@/components/ui/Toast';
 
 interface OrderRow {
   id: string;
@@ -53,12 +57,11 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
   const [report, setReport] = useState<DispatchReport | null>(null);
-  const [message, setMessage] = useState<string | null>(null);
+  const toast = useToast();
 
   async function load() {
-    setLoading(true); setError(null);
+    setLoading(true);
     try {
       const url = filter === 'all'
         ? '/admin/orders'
@@ -68,7 +71,7 @@ export default function OrdersPage() {
       const res = await api.get<{ orders: OrderRow[] }>(url);
       setOrders(res.orders);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Failed to load orders');
+      toast.error(e instanceof ApiError ? e.message : 'Failed to load orders');
     } finally {
       setLoading(false);
     }
@@ -84,13 +87,13 @@ export default function OrdersPage() {
   }, [filter]);
 
   async function redispatch(orderId: string) {
-    setBusy(orderId); setError(null); setMessage(null);
+    setBusy(orderId);
     try {
       const res = await api.post<{ offers_sent: number }>(`/admin/orders/${orderId}/redispatch`);
-      setMessage(`Re-dispatched — ${res.offers_sent} offer(s) sent to nearest captains.`);
+      toast.success(`Re-dispatched — ${res.offers_sent} offer(s) sent to nearest captains.`);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Re-dispatch failed');
+      toast.error(e instanceof ApiError ? e.message : 'Re-dispatch failed');
     } finally {
       setBusy(null);
     }
@@ -102,7 +105,7 @@ export default function OrdersPage() {
       const r = await api.get<DispatchReport>(`/admin/orders/${orderId}/dispatch-report`);
       setReport(r);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Diagnose failed');
+      toast.error(e instanceof ApiError ? e.message : 'Diagnose failed');
     } finally {
       setBusy(null);
     }
@@ -127,21 +130,43 @@ export default function OrdersPage() {
         </div>
       </div>
 
-      {message && (
-        <div className="mb-3 text-sm text-emerald-800 bg-emerald-50 border border-emerald-400 rounded-xl p-3">
-          {message}
+      {loading && orders.length === 0 && (
+        <div className="card p-0 overflow-hidden">
+          <table className="w-full text-sm">
+            <thead className="bg-surface-muted text-xs text-slate-500 uppercase">
+              <tr>
+                <th className="text-left p-3">Order</th>
+                <th className="text-left p-3">Service</th>
+                <th className="text-left p-3">Route</th>
+                <th className="text-left p-3">Status</th>
+                <th className="text-right p-3">Fare</th>
+                <th className="text-left p-3">When</th>
+                <th className="text-right p-3">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {Array.from({ length: 5 }).map((_, i) => (
+                <tr key={i} className="border-t border-surface-border">
+                  <td className="p-3"><Skeleton className="h-4 w-24" /></td>
+                  <td className="p-3"><Skeleton className="h-4 w-16" /></td>
+                  <td className="p-3 space-y-1"><Skeleton className="h-3 w-40" /><Skeleton className="h-3 w-32" /></td>
+                  <td className="p-3"><Skeleton className="h-6 w-24" rounded="full" /></td>
+                  <td className="p-3 text-right"><Skeleton className="h-4 w-12 ml-auto" /></td>
+                  <td className="p-3"><Skeleton className="h-3 w-16" /></td>
+                  <td className="p-3"><Skeleton className="h-7 w-20 ml-auto" /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
       )}
-      {error && (
-        <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-400 rounded-xl p-3">
-          {error}
-        </div>
-      )}
-
-      {loading && orders.length === 0 && <div className="text-center text-sm text-slate-500 py-8">Loading…</div>}
 
       {orders.length === 0 && !loading && (
-        <div className="card text-center py-10 text-slate-500">No orders in this bucket.</div>
+        <EmptyState
+          icon="📋"
+          title={`No ${filter === 'all' ? '' : filter.replace('_', ' ')} orders`}
+          description="Once customers or partners book, they'll appear here in real time."
+        />
       )}
 
       <div className="card p-0 overflow-hidden">
@@ -191,9 +216,10 @@ export default function OrdersPage() {
                       <button
                         onClick={() => redispatch(o.id)}
                         disabled={busy === o.id}
-                        className="btn-primary text-xs px-2 py-1 ml-1"
+                        className="btn-primary text-xs px-2 py-1 ml-1 inline-flex items-center gap-1"
                       >
-                        {busy === o.id ? '…' : 'Re-dispatch'}
+                        {busy === o.id ? <Spinner className="h-3 w-3" /> : null}
+                        Re-dispatch
                       </button>
                     )}
                   </td>

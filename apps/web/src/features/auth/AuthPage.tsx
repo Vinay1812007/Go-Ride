@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { supabase } from '@/lib/supabase';
+import { useToast } from '@/components/ui/Toast';
+import Spinner from '@/components/ui/Spinner';
 
 export default function AuthPage() {
   const [mode, setMode] = useState<'signin' | 'signup'>('signin');
@@ -7,23 +9,25 @@ export default function AuthPage() {
   const [password, setPassword] = useState('');
   const [name, setName] = useState('');
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    setBusy(true); setError(null);
+    setBusy(true);
     try {
       if (mode === 'signup') {
         const { error } = await supabase.auth.signUp({
           email, password, options: { data: { full_name: name || email.split('@')[0] } },
         });
         if (error) throw error;
+        toast.success('Account created — check your inbox to confirm your email.');
       } else {
         const { error } = await supabase.auth.signInWithPassword({ email, password });
         if (error) throw error;
+        toast.success('Welcome back!');
       }
     } catch (e: any) {
-      setError(e.message ?? 'Something went wrong');
+      toast.error(e?.message ?? 'Something went wrong');
     } finally {
       setBusy(false);
     }
@@ -78,9 +82,8 @@ export default function AuthPage() {
               autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
             />
           </label>
-          {error && <p className="text-sm text-red-600">{error}</p>}
           <button type="submit" disabled={busy} className="btn-primary w-full">
-            {busy ? 'Please wait…' : mode === 'signin' ? 'Sign in' : 'Create account'}
+            {busy ? <><Spinner /> Please wait</> : mode === 'signin' ? 'Sign in' : 'Create account'}
           </button>
           <button
             type="button"

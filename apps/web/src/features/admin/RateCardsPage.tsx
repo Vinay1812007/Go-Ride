@@ -5,6 +5,9 @@ import { useEffect, useMemo, useState } from 'react';
 import { api, ApiError } from '@/lib/api';
 import { inr, serviceLabel } from '@/lib/format';
 import type { ServiceType } from '@/lib/types';
+import { useToast } from '@/components/ui/Toast';
+import Skeleton from '@/components/ui/Skeleton';
+import EmptyState from '@/components/ui/EmptyState';
 
 interface RateCard {
   id?: number;
@@ -44,11 +47,10 @@ const DEFAULT_CARD: RateCard = {
 export default function RateCardsPage() {
   const [cards, setCards] = useState<RateCard[]>([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [flash, setFlash] = useState<string | null>(null);
   const [cityFilter, setCityFilter] = useState<string>('all');
   const [editing, setEditing] = useState<RateCard | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const toast = useToast();
 
   const cities = useMemo(
     () => Array.from(new Set(cards.map((c) => c.city))).sort(),
@@ -74,27 +76,21 @@ export default function RateCardsPage() {
       const res = await api.get<{ rate_cards: RateCard[] }>('/admin/rate-cards');
       setCards(res.rate_cards);
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Failed to load');
+      toast.error(e instanceof ApiError ? e.message : 'Failed to load');
     } finally {
       setLoading(false);
     }
   }
   useEffect(() => { void load(); }, []);
 
-  function showFlash(msg: string) {
-    setFlash(msg);
-    setTimeout(() => setFlash(null), 3500);
-  }
-
   async function save(card: RateCard) {
-    setError(null);
     try {
       await api.post('/admin/rate-cards', card);
       setEditing(null);
-      showFlash(`Saved ${serviceLabel(card.service)} for ${card.city}.`);
+      toast.success(`Saved ${serviceLabel(card.service)} for ${card.city}.`);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Save failed');
+      toast.error(e instanceof ApiError ? e.message : 'Save failed');
     }
   }
 
@@ -103,10 +99,10 @@ export default function RateCardsPage() {
     setBusyId(key);
     try {
       await api.post('/admin/rate-cards', { ...card, active: !card.active });
-      showFlash(`${card.active ? 'Disabled' : 'Enabled'} ${serviceLabel(card.service)} in ${card.city}.`);
+      toast.success(`${card.active ? 'Disabled' : 'Enabled'} ${serviceLabel(card.service)} in ${card.city}.`);
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Toggle failed');
+      toast.error(e instanceof ApiError ? e.message : 'Toggle failed');
     } finally {
       setBusyId(null);
     }
@@ -121,7 +117,7 @@ export default function RateCardsPage() {
       await api.post('/admin/rate-cards', { ...card, surge_multiplier: next });
       await load();
     } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Surge update failed');
+      toast.error(e instanceof ApiError ? e.message : 'Surge update failed');
     } finally {
       setBusyId(null);
     }
@@ -156,24 +152,18 @@ export default function RateCardsPage() {
         </div>
       </div>
 
-      {flash && (
-        <div className="mb-3 text-sm text-emerald-800 bg-emerald-50 border border-emerald-400 rounded-xl p-3">
-          {flash}
-        </div>
-      )}
-      {error && (
-        <div className="mb-3 text-sm text-red-700 bg-red-50 border border-red-400 rounded-xl p-3">
-          {error}
-        </div>
-      )}
-
       {loading && cards.length === 0 && (
-        <div className="card text-center py-10 text-slate-500">Loading rate cards…</div>
+        <div className="space-y-2">
+          {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" rounded="xl" />)}
+        </div>
       )}
       {!loading && cards.length === 0 && (
-        <div className="card text-center py-10 text-slate-500">
-          No rate cards yet. Click "New rate card" to add one.
-        </div>
+        <EmptyState
+          icon="💳"
+          title="No rate cards yet"
+          description="Add a rate card to start accepting orders for a city + service combination."
+          cta={{ label: '+ New rate card', onClick: () => setEditing({ ...DEFAULT_CARD }) }}
+        />
       )}
 
       {cardsByCity.map(([city, list]) => (

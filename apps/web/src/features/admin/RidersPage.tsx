@@ -1,8 +1,12 @@
 // Admin — riders list with KYC approve/reject + block.
 import { useEffect, useState } from 'react';
-import { api } from '@/lib/api';
+import { api, ApiError } from '@/lib/api';
 import { serviceLabel } from '@/lib/format';
 import type { ServiceType } from '@/lib/types';
+import Skeleton from '@/components/ui/Skeleton';
+import EmptyState from '@/components/ui/EmptyState';
+import Spinner from '@/components/ui/Spinner';
+import { useToast } from '@/components/ui/Toast';
 
 type KycStatus = 'pending' | 'approved' | 'rejected';
 
@@ -38,16 +42,16 @@ export default function RidersPage() {
   const [riders, setRiders] = useState<RiderRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [decisionBusy, setDecisionBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const toast = useToast();
 
   async function load() {
-    setLoading(true); setError(null);
+    setLoading(true);
     try {
       const url = filter === 'all' ? '/admin/riders' : `/admin/riders?kyc=${filter}`;
       const res = await api.get<{ riders: RiderRow[] }>(url);
       setRiders(res.riders);
-    } catch (e: any) {
-      setError(e?.message ?? 'Failed to load riders');
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Failed to load riders');
     } finally {
       setLoading(false);
     }
@@ -59,9 +63,10 @@ export default function RidersPage() {
     setDecisionBusy(riderId);
     try {
       await api.post(`/admin/riders/${riderId}/kyc?decision=${decision}`);
+      toast.success(decision === 'approved' ? 'Captain approved.' : 'Captain rejected.');
       await load();
-    } catch (e: any) {
-      setError(e?.message ?? 'Decision failed');
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Decision failed');
     } finally {
       setDecisionBusy(null);
     }
@@ -70,9 +75,10 @@ export default function RidersPage() {
   async function toggleBlock(profileId: string, blocked: boolean) {
     try {
       await api.post(`/admin/profiles/${profileId}/block?blocked=${blocked}`);
+      toast.success(blocked ? 'Captain blocked.' : 'Captain unblocked.');
       await load();
-    } catch (e: any) {
-      setError(e?.message ?? 'Block failed');
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Block failed');
     }
   }
 
@@ -95,12 +101,45 @@ export default function RidersPage() {
         </div>
       </div>
 
-      {error && <div className="mb-3 text-sm text-red-600">{error}</div>}
-
-      {loading && <div className="text-center text-sm text-slate-500 py-8">Loading…</div>}
+      {loading && riders.length === 0 && (
+        <div className="grid gap-3 md:grid-cols-2">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <div key={i} className="card space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 space-y-1">
+                  <Skeleton className="h-4 w-32" />
+                  <Skeleton className="h-3 w-40" />
+                  <Skeleton className="h-3 w-24 mt-2" />
+                </div>
+                <Skeleton className="h-6 w-16" rounded="full" />
+              </div>
+              <div className="grid grid-cols-2 gap-x-3 gap-y-1">
+                {Array.from({ length: 6 }).map((_, j) => <Skeleton key={j} className="h-3 w-full" />)}
+              </div>
+              <div className="flex gap-2">
+                <Skeleton className="h-10 flex-1" />
+                <Skeleton className="h-10 flex-1" />
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
 
       {!loading && riders.length === 0 && (
-        <div className="card text-center py-10 text-slate-500">No riders in this bucket.</div>
+        <EmptyState
+          icon={filter === 'pending' ? '👥' : filter === 'approved' ? '✓' : '✗'}
+          title={
+            filter === 'pending'  ? 'No pending KYC applications' :
+            filter === 'approved' ? 'No approved captains yet' :
+            filter === 'rejected' ? 'No rejected applications' :
+            'No captains in the system'
+          }
+          description={
+            filter === 'pending'
+              ? 'New captain applications will appear here for KYC review.'
+              : 'Ask captains to sign up at goride-captain.pages.dev'
+          }
+        />
       )}
 
       <div className="grid gap-3 md:grid-cols-2">
@@ -142,9 +181,10 @@ export default function RidersPage() {
                 <button
                   onClick={() => decide(r.id, 'approved')}
                   disabled={decisionBusy === r.id}
-                  className="btn-primary flex-1 h-10"
+                  className="btn-primary flex-1 h-10 inline-flex items-center justify-center gap-1"
                 >
-                  {decisionBusy === r.id ? '…' : 'Approve'}
+                  {decisionBusy === r.id && <Spinner className="h-3 w-3" />}
+                  Approve
                 </button>
               )}
               {r.kyc !== 'rejected' && (

@@ -1,6 +1,7 @@
 import type { ServiceType } from '@/lib/types';
 import { inr, minutes, km, serviceLabel } from '@/lib/format';
 import { cn } from '@/lib/cn';
+import Skeleton from './ui/Skeleton';
 
 export interface VehicleQuote {
   service: ServiceType;
@@ -51,12 +52,20 @@ export default function VehicleSelector({ quotes, selected, onSelect }: Props) {
             <span className="text-3xl w-12 text-center">{q.icon ?? DEFAULT_ICONS[q.service] ?? '🚕'}</span>
             <div className="flex-1 min-w-0">
               <div className="font-semibold truncate">{serviceLabel(q.service)}</div>
-              <div className="text-xs text-slate-500">
-                {q.loading ? 'Calculating…' : `${minutes(q.eta_min)} · ${km(q.distance_km)}`}
-              </div>
+              {q.loading ? (
+                <Skeleton className="h-3 w-32 mt-1" />
+              ) : (
+                <div className="text-xs text-slate-500">
+                  {minutes(q.eta_min)} · {km(q.distance_km)}
+                </div>
+              )}
             </div>
             <div className="text-right">
-              <div className="font-bold text-lg">{q.loading ? '…' : inr(q.fare)}</div>
+              {q.loading ? (
+                <Skeleton className="h-5 w-16" />
+              ) : (
+                <div className="font-bold text-lg">{inr(q.fare)}</div>
+              )}
               {q.unavailable && <div className="text-[10px] text-slate-400">Not available</div>}
             </div>
           </button>

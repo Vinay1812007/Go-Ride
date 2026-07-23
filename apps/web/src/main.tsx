@@ -5,6 +5,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import 'maplibre-gl/dist/maplibre-gl.css';
 import './index.css';
 import App from './App';
+import { ToastProvider } from './components/ui/Toast';
 
 const qc = new QueryClient({
   defaultOptions: {
@@ -16,7 +17,9 @@ ReactDOM.createRoot(document.getElementById('root')!).render(
   <React.StrictMode>
     <QueryClientProvider client={qc}>
       <BrowserRouter>
-        <App />
+        <ToastProvider>
+          <App />
+        </ToastProvider>
       </BrowserRouter>
     </QueryClientProvider>
   </React.StrictMode>,
