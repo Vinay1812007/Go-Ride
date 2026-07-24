@@ -198,12 +198,21 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN:  ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          # Pass commit message via env, NOT inline `${{ ... }}` interpolation —
+          # otherwise embedded double-quotes / newlines break shell parsing and
+          # exit the deploy step with code 1.
+          COMMIT_MSG: ${{ github.event.head_commit.message }}
+          PROJECT:    ${{ matrix.project }}
+          SHA:        ${{ github.sha }}
         run: |
+          # Wrangler's --commit-message takes only the first line anyway;
+          # trim to that + cap length to avoid weird edge cases.
+          FIRST_LINE=$(printf '%s' "$COMMIT_MSG" | head -n1 | cut -c1-500)
           npx wrangler pages deploy dist \
-            --project-name=${{ matrix.project }} \
+            --project-name="$PROJECT" \
             --branch=main \
-            --commit-hash=${{ github.sha }} \
-            --commit-message="${{ github.event.head_commit.message }}"
+            --commit-hash="$SHA" \
+            --commit-message="$FIRST_LINE"
 
       - name: Print URL
         run: |
