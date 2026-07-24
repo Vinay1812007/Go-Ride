@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import type { AppEnv } from '../lib/env';
 import { requireAuth, requireRole } from '../lib/auth';
-import { admin } from '../lib/supabase';
+import { admin, broadcast } from '../lib/supabase';
 import {
   rateCardBody,
   refundBody,
@@ -13,6 +13,8 @@ import {
   runPayoutsBody,
   cityUpsertBody,
   cloneRateCardsBody,
+  supportMessageBody,
+  adminUpdateTicketBody,
 } from '../lib/schemas';
 import { dispatch } from '../lib/dispatch';
 import { haversineKm } from '../lib/geo';
@@ -854,6 +856,147 @@ adminRoute.get('/restaurants/:id/partner', async (c) => {
     .eq('role', 'restaurant_partner')
     .maybeSingle();
   return c.json({ partner: data ?? null });
+});
+
+// ---- Support ticket admin ----
+// GET /admin/support/tickets?status=open|assigned|awaiting_customer|resolved|all
+//                            &mine=1 (only mine when assigned_to = me)
+adminRoute.get('/support/tickets', async (c) => {
+  const status = c.req.query('status') ?? 'open';
+  const mine   = c.req.query('mine') === '1';
+  const uid    = c.get('userId')!;
+  const db = admin(c.env);
+
+  let q = db.from('support_tickets')
+    .select('id, subject, status, priority, order_id, assigned_to, customer_id, created_at, updated_at, closed_at, profiles!support_tickets_customer_id_fkey(full_name, email, phone)')
+    .order('updated_at', { ascending: false })
+    .limit(500);
+  if (status !== 'all')   q = q.eq('status', status);
+  if (mine)               q = q.eq('assigned_to', uid);
+
+  const { data } = await q;
+  return c.json({ tickets: data ?? [] });
+});
+
+// GET /admin/support/tickets/:id — ticket + messages + customer profile.
+// Also marks customer-sent messages as read by agent.
+adminRoute.get('/support/tickets/:id', async (c) => {
+  const db = admin(c.env);
+  const tid = c.req.param('id');
+  const [{ data: ticket }, { data: messages }] = await Promise.all([
+    db.from('support_tickets')
+      .select('id, subject, status, priority, order_id, assigned_to, customer_id, created_at, updated_at, closed_at, profiles!support_tickets_customer_id_fkey(full_name, email, phone)')
+      .eq('id', tid)
+      .maybeSingle(),
+    db.from('support_messages')
+      .select('id, sender_role, sender_id, body, read_by_customer_at, read_by_agent_at, created_at')
+      .eq('ticket_id', tid)
+      .order('created_at', { ascending: true })
+      .limit(500),
+  ]);
+  if (!ticket) return c.json({ error: { code: 'not_found' } }, 404);
+
+  // Mark customer messages read by agent (best-effort).
+  await db.from('support_messages')
+    .update({ read_by_agent_at: new Date().toISOString() })
+    .eq('ticket_id', tid)
+    .eq('sender_role', 'customer')
+    .is('read_by_agent_at', null);
+
+  return c.json({ ticket, messages: messages ?? [] });
+});
+
+// PATCH /admin/support/tickets/:id — set status / priority / assignment.
+// Setting status=resolved stamps closed_at. Setting assigned_to='me' picks
+// the caller up as the agent.
+adminRoute.patch('/support/tickets/:id', async (c) => {
+  const body = await parse(c, adminUpdateTicketBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const uid = c.get('userId')!;
+
+  const patch: Record<string, unknown> = { ...body, updated_at: new Date().toISOString() };
+  if (body.status === 'resolved') patch.closed_at = new Date().toISOString();
+  if (body.status && body.status !== 'resolved') patch.closed_at = null;
+  // Auto-promote 'open' → 'assigned' when someone picks it up.
+  if (body.assigned_to && !body.status) {
+    patch.status = 'assigned';
+  }
+
+  const { data, error } = await admin(c.env)
+    .from('support_tickets')
+    .update(patch)
+    .eq('id', c.req.param('id'))
+    .select('id, status, assigned_to, customer_id')
+    .maybeSingle();
+  if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
+  if (!data) return c.json({ error: { code: 'not_found' } }, 404);
+
+  // Broadcast to the customer so their inbox sees the status change instantly.
+  c.executionCtx.waitUntil(
+    broadcast(c.env, `ticket:${data.id}`, 'status', { status: data.status }).catch(() => {}),
+  );
+
+  // Return the updated row with the effective agent name (if any).
+  void uid; // silences unused warning when no assignment
+  return c.json({ ticket: data });
+});
+
+// POST /admin/support/tickets/:id/messages — admin sends a reply.
+// Auto-flips ticket status to 'awaiting_customer' unless it was resolved.
+adminRoute.post('/support/tickets/:id/messages', async (c) => {
+  const body = await parse(c, supportMessageBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const uid = c.get('userId')!;
+  const db = admin(c.env);
+  const tid = c.req.param('id');
+
+  const { data: ticket } = await db
+    .from('support_tickets')
+    .select('id, status, customer_id, assigned_to')
+    .eq('id', tid)
+    .maybeSingle();
+  if (!ticket) return c.json({ error: { code: 'not_found' } }, 404);
+  if (ticket.status === 'resolved') {
+    return c.json({ error: { code: 'ticket_resolved' } }, 409);
+  }
+
+  const { data: msg, error } = await db
+    .from('support_messages')
+    .insert({
+      ticket_id: tid,
+      sender_role: 'admin',
+      sender_id: uid,
+      body: body.body.trim(),
+    })
+    .select('id, sender_role, sender_id, body, read_by_customer_at, read_by_agent_at, created_at')
+    .single();
+  if (error || !msg) return c.json({ error: { code: 'insert_failed', message: error?.message } }, 500);
+
+  // If the ticket wasn't already assigned, self-assign on first reply.
+  // Flip status to 'awaiting_customer' so the queue chip shows "we've replied".
+  const updates: Record<string, unknown> = { status: 'awaiting_customer' };
+  if (!ticket.assigned_to) updates.assigned_to = uid;
+  await db.from('support_tickets').update(updates).eq('id', tid);
+
+  // Broadcasts: to the live thread + a lightweight per-user ping for the
+  // customer's inbox badge.
+  c.executionCtx.waitUntil(broadcast(c.env, `ticket:${tid}`, 'message', msg).catch(() => {}));
+  c.executionCtx.waitUntil(
+    broadcast(c.env, `customer:${ticket.customer_id}`, 'ticket_message', { ticket_id: tid, preview: msg.body.slice(0, 80) }).catch(() => {}),
+  );
+
+  return c.json({ message: msg });
+});
+
+// GET /admin/support/counts — small badge counts for the sidebar.
+adminRoute.get('/support/counts', async (c) => {
+  const db = admin(c.env);
+  const [{ count: open }, { count: assigned }, { count: awaiting }] = await Promise.all([
+    db.from('support_tickets').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+    db.from('support_tickets').select('id', { count: 'exact', head: true }).eq('status', 'assigned'),
+    db.from('support_tickets').select('id', { count: 'exact', head: true }).eq('status', 'awaiting_customer'),
+  ]);
+  return c.json({ open: open ?? 0, assigned: assigned ?? 0, awaiting_customer: awaiting ?? 0 });
 });
 
 // ---- Dynamic surge ----

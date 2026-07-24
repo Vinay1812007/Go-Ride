@@ -1403,7 +1403,82 @@ Edit the migration file, re-apply.
 
 ---
 
-## 33. Phase 3 (not built — deferred to post-MVP)
+## 33. Support tickets
+
+Customer ↔ admin support channel, distinct from the in-trip captain
+chat (§15). A ticket outlives any single trip, has a lifecycle
+(open → assigned → awaiting_customer → resolved), and threads
+messages that both sides can add until it's resolved.
+
+### Model
+
+- **`support_tickets`** — id, customer_id, order_id (nullable
+  context), subject, status, priority, assigned_to (admin FK),
+  created_at, updated_at, closed_at.
+- **`support_messages`** — id, ticket_id, sender_role, sender_id,
+  body, read_by_customer_at, read_by_agent_at, created_at.
+- **Trigger** `on_support_message` bumps `updated_at` after every
+  insert and auto-reopens (`awaiting_customer` → `assigned`) when
+  the customer replies to a ticket the admin had punted back.
+- **RLS:** customer sees + manages own tickets/messages; admins full
+  access. `support_messages` in the Supabase Realtime publication.
+
+### Customer flow
+
+- **Entry point:** Wallet page has a new **💬 Support** card
+  ("Missing credit, wrong charge, trip issue — we'll get back to you").
+- **`/support`** — inbox list of own tickets with status chip +
+  updated_at. **+ New** opens a bottom-sheet form: subject +
+  description + priority.
+- **Ticket detail** — full thread with day dividers ("Today",
+  "Yesterday", …), admin messages in grey bubbles with "Support"
+  attribution, customer messages in yellow. "Read" receipt shows on
+  customer bubbles once agent opens the ticket.
+- **Resolved tickets** show a green banner and no reply box — customer
+  can open a fresh ticket instead.
+
+### Admin flow
+
+- **New sidebar entry Support** between Restaurants and Wallet.
+- **Two-pane layout:** filterable list (Open / Assigned / Awaiting
+  cust. / Resolved / All + "Mine only" checkbox) on the left, full
+  thread + reply box on the right.
+- **Auto-refresh every 15s** so a live queue stays warm.
+- **Header controls:** priority pills (Low / Normal / **High** red),
+  Assign-to-me chip when Open, ✓ Resolve chip when not yet resolved.
+- **First reply from an unassigned admin auto-assigns them** and
+  flips status to `awaiting_customer` (customer's turn now).
+
+### Realtime
+
+Every message insert broadcasts on `ticket:{id}` for the thread and
+on `customer:{customer_id}` / `admin:{assigned_to}` for lightweight
+inbox pings. Both sides use the ticket channel; the per-user channel
+is future room for a badge count when we get there.
+
+### Endpoints
+
+| Endpoint | Notes |
+|---|---|
+| Customer | |
+| `GET /support/tickets` | My tickets, most recent first |
+| `POST /support/tickets` | Open ticket + seed first message |
+| `GET /support/tickets/:id` | Ticket + messages; marks admin msgs read |
+| `POST /support/tickets/:id/messages` | Send reply. Guards on membership + not resolved |
+| Admin | |
+| `GET /admin/support/tickets?status=&mine=1` | Queue with joined customer profile |
+| `GET /admin/support/tickets/:id` | Full thread; marks customer msgs read |
+| `PATCH /admin/support/tickets/:id` | Status / priority / assignment. `status=resolved` stamps closed_at |
+| `POST /admin/support/tickets/:id/messages` | Reply. Auto-assigns + flips to awaiting_customer |
+| `GET /admin/support/counts` | Sidebar badge counts |
+
+Schema is in `supabase/migrations/0013_support_tickets.sql` — apply
+via **Actions → Apply Supabase migrations → target: support-tickets**
+(or `all`).
+
+---
+
+## 34. Phase 3 (not built — deferred to post-MVP)
 
 - **Automatic UPI/bank integration** — replace the manual mark-paid
   step with a Razorpay / Cashfree webhook loop. Real-money surface,
@@ -1411,7 +1486,7 @@ Edit the migration file, re-apply.
 - **Native iOS APK** — needs Apple Developer account + APNs cert.
 - More e2e coverage (full customer → captain trip flow) — needs a
   test data seeder that resets between runs.
-- **Chat with support agents** — new admin-support role + queue
-  routing + inbox UI.
+- **Support inbox badge on customer app** — light per-user ping
+  channel already broadcasts; UI-only work.
 
 Say what you want to tackle next.

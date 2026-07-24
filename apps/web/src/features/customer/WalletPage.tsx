@@ -153,6 +153,19 @@ export default function WalletPage() {
           </div>
         )}
 
+        {/* Support */}
+        <Link
+          to="/support"
+          className="card flex items-center gap-3 hover:shadow-lg transition"
+        >
+          <div className="h-10 w-10 rounded-xl bg-brand-500 grid place-items-center text-xl flex-shrink-0">💬</div>
+          <div className="flex-1 min-w-0">
+            <div className="text-sm font-semibold">Support</div>
+            <div className="text-xs text-slate-500">Missing credit, wrong charge, trip issue — we'll get back to you.</div>
+          </div>
+          <span className="text-brand-800 font-bold">→</span>
+        </Link>
+
         {/* Ledger */}
         <div className="card p-0 overflow-hidden">
           <div className="p-3 text-xs uppercase tracking-wider text-slate-500 font-semibold border-b border-surface-border">

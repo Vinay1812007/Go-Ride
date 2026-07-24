@@ -28,6 +28,7 @@ on:
           - service-areas    # 0010
           - restaurant-partners  # 0011
           - dynamic-surge    # 0012
+          - support-tickets  # 0013
           - seed-only        # seed.sql
 
 jobs:
@@ -72,6 +73,7 @@ jobs:
               run_sql supabase/migrations/0010_service_area_polygons.sql
               run_sql supabase/migrations/0011_restaurant_partners.sql
               run_sql supabase/migrations/0012_dynamic_surge.sql
+              run_sql supabase/migrations/0013_support_tickets.sql
               run_sql supabase/seed.sql
               ;;
             schema-only)     run_sql supabase/migrations/0001_init.sql ;;
@@ -86,6 +88,7 @@ jobs:
             service-areas)   run_sql supabase/migrations/0010_service_area_polygons.sql ;;
             restaurant-partners) run_sql supabase/migrations/0011_restaurant_partners.sql ;;
             dynamic-surge)   run_sql supabase/migrations/0012_dynamic_surge.sql ;;
+            support-tickets) run_sql supabase/migrations/0013_support_tickets.sql ;;
             seed-only)       run_sql supabase/seed.sql ;;
           esac
 

@@ -74,6 +74,26 @@ export const sendMessageBody = z.object({
   body: z.string().min(1).max(1000),
 });
 
+// POST /support/tickets — customer opens a new ticket
+export const createSupportTicketBody = z.object({
+  subject:   z.string().min(3).max(200),
+  body:      z.string().min(1).max(4000),  // seeds the first message
+  order_id:  z.string().uuid().optional(),
+  priority:  z.enum(['low', 'normal', 'high']).default('normal'),
+});
+
+// POST /support/tickets/:id/messages + POST /admin/support/tickets/:id/messages
+export const supportMessageBody = z.object({
+  body: z.string().min(1).max(4000),
+});
+
+// PATCH /admin/support/tickets/:id — admin updates status / priority / assignment
+export const adminUpdateTicketBody = z.object({
+  status:      z.enum(['open', 'assigned', 'awaiting_customer', 'resolved']).optional(),
+  priority:    z.enum(['low', 'normal', 'high']).optional(),
+  assigned_to: z.string().uuid().nullable().optional(),
+});
+
 // POST /rides/location (rider heartbeat)
 export const locationPingBody = z.object({
   lat: z.number(),

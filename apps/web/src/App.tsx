@@ -28,6 +28,7 @@ const FoodBrowsePage   = lazy(() => import('./features/customer/FoodBrowsePage')
 const RestaurantPage   = lazy(() => import('./features/customer/RestaurantPage'));
 const FoodCheckoutPage = lazy(() => import('./features/customer/FoodCheckoutPage'));
 const WalletPage       = lazy(() => import('./features/customer/WalletPage'));
+const SupportPage      = lazy(() => import('./features/customer/SupportPage'));
 const CaptainShell     = lazy(() => import('./features/rider/CaptainShell'));
 const AdminShell       = lazy(() => import('./features/admin/AdminShell'));
 const RestaurantPartnerShell = lazy(() => import('./features/restaurant-partner/RestaurantPartnerShell'));
@@ -148,6 +149,7 @@ export default function App() {
           <Route path="/food/checkout" element={<FoodCheckoutPage />} />
           <Route path="/food/:restaurantId" element={<RestaurantPage />} />
           <Route path="/wallet" element={<WalletPage />} />
+          <Route path="/support" element={<SupportPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Suspended>
@@ -225,6 +227,7 @@ export default function App() {
         <Route path="/food/checkout" element={<FoodCheckoutPage />} />
         <Route path="/food/:restaurantId" element={<RestaurantPage />} />
         <Route path="/wallet" element={<WalletPage />} />
+        <Route path="/support" element={<SupportPage />} />
         <Route path="/captain/*" element={<CaptainShell />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>

@@ -17,6 +17,7 @@ import WalletAdminPage from './WalletAdminPage';
 import PayoutsPage from './PayoutsPage';
 import CitiesPage from './CitiesPage';
 import SurgePage from './SurgePage';
+import SupportPage from './SupportPage';
 
 interface Stats { online_riders: number; active_orders: number; revenue_today: number }
 
@@ -118,6 +119,7 @@ export default function AdminShell() {
     { to: '/admin/surge',       label: 'Surge' },
     { to: '/admin/promos',      label: 'Promos' },
     { to: '/admin/restaurants', label: 'Restaurants' },
+    { to: '/admin/support',     label: 'Support' },
     { to: '/admin/wallet',      label: 'Wallet & credits' },
     { to: '/admin/payouts',     label: 'Payouts' },
     { to: '/admin/reports',     label: 'Reports' },
@@ -147,6 +149,7 @@ export default function AdminShell() {
           <Route path="cities" element={<CitiesPage />} />
           <Route path="rate-cards" element={<RateCardsPage />} />
           <Route path="surge" element={<SurgePage />} />
+          <Route path="support" element={<SupportPage />} />
           <Route path="promos" element={<PromosPage />} />
           <Route path="restaurants" element={<RestaurantsPage />} />
           <Route path="wallet" element={<WalletAdminPage />} />
