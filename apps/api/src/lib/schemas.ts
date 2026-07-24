@@ -203,6 +203,28 @@ export const markPayoutPaidBody = z.object({
   note: z.string().max(300).optional(),
 });
 
+// Admin: upsert a city / service area
+export const cityUpsertBody = z.object({
+  id: z.number().int().optional(),
+  city: z.string().min(2).max(60),
+  display_name: z.string().min(1).max(100).optional(),
+  country: z.string().length(2).default('IN'),
+  timezone: z.string().max(60).default('Asia/Kolkata'),
+  center_lat: z.number().min(-90).max(90),
+  center_lng: z.number().min(-180).max(180),
+  radius_km: z.number().min(1).max(200).default(25),
+  // Optional polygon — array of {lat, lng} vertices, min 3.
+  polygon: z.array(z.object({ lat: z.number(), lng: z.number() })).min(3).max(200).nullable().optional(),
+  active: z.boolean().default(true),
+});
+
+// Admin: clone existing rate cards from one city to another
+export const cloneRateCardsBody = z.object({
+  from_city: z.string(),
+  to_city: z.string(),
+  overwrite: z.boolean().default(false),
+});
+
 // Admin: run payouts manually — window is optional, defaults to previous week
 export const runPayoutsBody = z.object({
   from: z.string().datetime().optional(),

@@ -1038,12 +1038,79 @@ with null args so it defaults to the previous full ISO week.
 
 ---
 
-## 26. Phase 3 (not built)
+## 26. Cities & service areas (multi-city support)
+
+Every table with a `city` column (rate_cards, orders, riders, service_areas)
+was already city-keyed since day one — this section adds the admin UI to
+manage cities, a `/geo/detect-city` endpoint for the customer app, and a
+one-click "clone rate cards" bootstrap for new cities.
+
+### Model
+
+- **`service_areas`** now has `display_name`, `country` (ISO2, default IN),
+  `timezone` (default Asia/Kolkata), and an optional `polygon` column
+  (`jsonb` — array of `{lat, lng}` vertices). If polygon is set, it
+  overrides the existing center + radius circle for
+  point-in-service-area checks.
+- **Point-in-polygon** runs in JS on the Worker (`apps/api/src/lib/cities.ts`)
+  via classic ray casting — no PostGIS required, fine at pilot scale.
+- **Nested-city rule:** if a lat/lng hits multiple active polygons, the
+  smallest bounding box wins. So "Hyderabad Old City" beats "Hyderabad"
+  when both contain the point.
+- **Fallback:** rows with no polygon fall back to
+  `haversine(point, center) ≤ radius_km`, sorted by distance.
+
+### Admin flow
+
+New sidebar entry **Cities** (`/admin/cities`) above Rate cards.
+
+- **Card grid** — one card per city with slug, display name, timezone,
+  centre coords, coverage chip (Circle · Nkm / Polygon · Npt), and
+  live rate-card count (active/total).
+- **New city / Edit** — form with slug + display name + country + tz +
+  centre lat/lng + radius, plus a JSON textarea for optional polygon
+  vertices. **Live MapLibre preview on the right** renders the yellow
+  circle or polygon overlay so admins eyeball the shape before saving.
+- **Clone rate cards** — the third chip on every card. Opens a modal
+  with a dropdown of source cities (only those with existing rate
+  cards appear) + an "overwrite" toggle. Backend copies every rate
+  card row from source → target; without overwrite it's an insert
+  (skips duplicates on `(city, service)`), with it's an upsert.
+  Ideal Hyderabad → Bengaluru bootstrap: 9 rate cards ported in one
+  click, then tweak per-service pricing after.
+- **Toggle Active / Delete** — soft-delete (flips `active=false`) so
+  existing orders + rate cards keep resolving.
+
+### Endpoints
+
+| Endpoint | Notes |
+|---|---|
+| `GET /admin/cities` | All cities incl. inactive, with rate-card counts |
+| `POST /admin/cities` | Upsert |
+| `DELETE /admin/cities/:id` | Soft-delete |
+| `POST /admin/cities/clone-rate-cards` | Body: `{from_city, to_city, overwrite}` |
+| `GET /geo/detect-city?lat=&lng=` | Public, returns best-matching active area or `{city: null}` |
+
+### Customer app integration (future)
+
+The customer app still uses `VITE_DEFAULT_CITY` — swap that per Pages
+project to pin each build to a city. For a single build that auto-picks
+based on the user's GPS, call `GET /geo/detect-city` after
+`getCurrentPosition()` and use the returned `city` string as
+`VITE_DEFAULT_CITY`'s runtime replacement. Left as a follow-up.
+
+Schema is in `supabase/migrations/0010_service_area_polygons.sql` —
+apply via **Actions → Apply Supabase migrations → target: service-areas**
+(or `all`).
+
+---
+
+## 27. Phase 3 (not built)
 
 - Native iOS APK (needs Apple Developer account + APNs cert).
-- Multi-city rate cards + service area polygons.
 - Restaurant partner portal (their own admin login).
 - Playwright end-to-end tests for the critical flows.
 - Automatic UPI/bank integration (replace the manual mark-paid step).
+- Customer app: runtime city auto-detect + city picker.
 
 Say what you want to tackle next.

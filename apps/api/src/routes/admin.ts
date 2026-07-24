@@ -11,6 +11,8 @@ import {
   menuItemUpsertBody,
   markPayoutPaidBody,
   runPayoutsBody,
+  cityUpsertBody,
+  cloneRateCardsBody,
 } from '../lib/schemas';
 import { dispatch } from '../lib/dispatch';
 import { haversineKm } from '../lib/geo';
@@ -796,6 +798,82 @@ adminRoute.delete('/restaurants/:id/menu/:itemId', async (c) => {
     .eq('restaurant_id', c.req.param('id'));
   if (error) return c.json({ error: { code: 'delete_failed', message: error.message } }, 500);
   return c.json({ ok: true });
+});
+
+// ---- Cities / service areas ----
+// GET /admin/cities — all cities (active + inactive) with rate-card count
+adminRoute.get('/cities', async (c) => {
+  const db = admin(c.env);
+  const [{ data: cities }, { data: cards }] = await Promise.all([
+    db.from('service_areas')
+      .select('id, city, display_name, country, timezone, center_lat, center_lng, radius_km, polygon, active, created_at')
+      .order('city', { ascending: true }),
+    db.from('rate_cards').select('city, active').limit(10_000),
+  ]);
+  const counts = new Map<string, { total: number; active: number }>();
+  for (const rc of cards ?? []) {
+    const c = counts.get(rc.city) ?? { total: 0, active: 0 };
+    c.total++;
+    if (rc.active) c.active++;
+    counts.set(rc.city, c);
+  }
+  const enriched = (cities ?? []).map((r) => ({
+    ...r,
+    rate_card_count:  counts.get(r.city)?.total  ?? 0,
+    rate_card_active: counts.get(r.city)?.active ?? 0,
+  }));
+  return c.json({ cities: enriched });
+});
+
+adminRoute.post('/cities', async (c) => {
+  const body = await parse(c, cityUpsertBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const db = admin(c.env);
+  const { id, ...upsert } = body;
+  const query = id
+    ? db.from('service_areas').update(upsert).eq('id', id).select().single()
+    : db.from('service_areas').insert(upsert).select().single();
+  const { data, error } = await query;
+  if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
+  return c.json({ city: data });
+});
+
+adminRoute.delete('/cities/:id', async (c) => {
+  // Soft-delete: flip active=false so existing orders + rate cards keep
+  // resolving. If someone later wants a permanent hard delete, that's
+  // an admin SQL job.
+  const { error } = await admin(c.env).from('service_areas').update({ active: false }).eq('id', c.req.param('id'));
+  if (error) return c.json({ error: { code: 'delete_failed', message: error.message } }, 500);
+  return c.json({ ok: true });
+});
+
+// POST /admin/cities/clone-rate-cards — copies rate_cards from one city to another.
+// Useful when bootstrapping a new city: clone Hyderabad's cards, tweak
+// per-service pricing after. onConflict on (city, service) means re-running
+// is a no-op unless `overwrite=true`.
+adminRoute.post('/cities/clone-rate-cards', async (c) => {
+  const body = await parse(c, cloneRateCardsBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  if (body.from_city === body.to_city) return c.json({ error: { code: 'same_city' } }, 400);
+
+  const db = admin(c.env);
+  const { data: cards } = await db
+    .from('rate_cards')
+    .select('service, base_fare, base_km, per_km, per_min, min_fare, surge_multiplier, commission_pct, parcel_weight_limit_kg, active')
+    .eq('city', body.from_city);
+  if (!cards || cards.length === 0) {
+    return c.json({ error: { code: 'source_empty', message: `No rate cards found for ${body.from_city}` } }, 404);
+  }
+  const rows = cards.map((rc) => ({ ...rc, city: body.to_city }));
+  const query = body.overwrite
+    ? db.from('rate_cards').upsert(rows, { onConflict: 'city,service' })
+    : db.from('rate_cards').insert(rows).select('id');
+  // On non-overwrite mode a duplicate-key error is expected — swallow it and count what we got.
+  const { error, count } = await query;
+  if (error && !body.overwrite && !/duplicate|unique/i.test(error.message)) {
+    return c.json({ error: { code: 'clone_failed', message: error.message } }, 500);
+  }
+  return c.json({ created: count ?? rows.length, from: body.from_city, to: body.to_city });
 });
 
 // ---- Payouts ----
