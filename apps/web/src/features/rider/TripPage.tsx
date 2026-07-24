@@ -5,6 +5,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import MapView from '@/components/MapView';
 import StatusStepper from '@/components/ui/StatusStepper';
 import ChatDrawer from '@/components/ChatDrawer';
+import SosButton from '@/components/SosButton';
 import { api, ApiError } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { useChatUnread } from '@/hooks/useChatUnread';
@@ -90,9 +91,13 @@ export default function TripPage() {
   const showOtpInput = order.status === 'arrived';
   const showCashCollect = (order.status === 'completed' || order.status === 'delivered');
   const cashAmount = order.fare_final ?? order.fare_estimate ?? 0;
+  const showSos = ['accepted', 'arrived', 'picked_up', 'in_transit'].includes(order.status);
 
   return (
     <div className="h-full flex flex-col">
+      {showSos && (
+        <SosButton orderId={order.id} fallback={{ lat: order.pickup_lat, lng: order.pickup_lng }} />
+      )}
       <div className="absolute inset-0">
         <MapView
           pickup={{ lat: order.pickup_lat, lng: order.pickup_lng }}

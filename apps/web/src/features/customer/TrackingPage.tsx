@@ -4,6 +4,7 @@ import MapView from '@/components/MapView';
 import StatusStepper from '@/components/ui/StatusStepper';
 import LoadingScreen from '@/components/ui/LoadingScreen';
 import ChatDrawer from '@/components/ChatDrawer';
+import SosButton from '@/components/SosButton';
 import { api } from '@/lib/api';
 import { supabase } from '@/lib/supabase';
 import { useChatUnread } from '@/hooks/useChatUnread';
@@ -108,8 +109,13 @@ export default function TrackingPage() {
 
   if (!order) return <LoadingScreen label="Loading your trip…" />;
 
+  const showSos = ['accepted', 'arrived', 'picked_up', 'in_transit'].includes(order.status);
+
   return (
     <div className="h-full flex flex-col">
+      {showSos && (
+        <SosButton orderId={order.id} fallback={{ lat: order.pickup_lat, lng: order.pickup_lng }} />
+      )}
       <div className="absolute inset-0">
         <MapView
           pickup={{ lat: order.pickup_lat, lng: order.pickup_lng }}

@@ -19,6 +19,7 @@ import PayoutsPage from './PayoutsPage';
 import CitiesPage from './CitiesPage';
 import SurgePage from './SurgePage';
 import SupportPage from './SupportPage';
+import SosPage from './SosPage';
 
 interface Ops {
   kpi: {
@@ -319,6 +320,7 @@ export default function AdminShell() {
     { to: '/admin/surge',       label: 'Surge' },
     { to: '/admin/promos',      label: 'Promos' },
     { to: '/admin/restaurants', label: 'Restaurants' },
+    { to: '/admin/sos',         label: '🚨 SOS' },
     { to: '/admin/support',     label: 'Support' },
     { to: '/admin/wallet',      label: 'Wallet & credits' },
     { to: '/admin/payouts',     label: 'Payouts' },
@@ -350,6 +352,7 @@ export default function AdminShell() {
           <Route path="rate-cards" element={<RateCardsPage />} />
           <Route path="surge" element={<SurgePage />} />
           <Route path="support" element={<SupportPage />} />
+          <Route path="sos" element={<SosPage />} />
           <Route path="promos" element={<PromosPage />} />
           <Route path="restaurants" element={<RestaurantsPage />} />
           <Route path="wallet" element={<WalletAdminPage />} />

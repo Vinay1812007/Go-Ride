@@ -30,6 +30,7 @@ on:
           - dynamic-surge    # 0012
           - support-tickets  # 0013
           - saved-places     # 0014
+          - sos              # 0015
           - seed-only        # seed.sql
 
 jobs:
@@ -76,6 +77,7 @@ jobs:
               run_sql supabase/migrations/0012_dynamic_surge.sql
               run_sql supabase/migrations/0013_support_tickets.sql
               run_sql supabase/migrations/0014_saved_places.sql
+              run_sql supabase/migrations/0015_sos_alerts.sql
               run_sql supabase/seed.sql
               ;;
             schema-only)     run_sql supabase/migrations/0001_init.sql ;;
@@ -92,6 +94,7 @@ jobs:
             dynamic-surge)   run_sql supabase/migrations/0012_dynamic_surge.sql ;;
             support-tickets) run_sql supabase/migrations/0013_support_tickets.sql ;;
             saved-places)    run_sql supabase/migrations/0014_saved_places.sql ;;
+            sos)             run_sql supabase/migrations/0015_sos_alerts.sql ;;
             seed-only)       run_sql supabase/seed.sql ;;
           esac
 

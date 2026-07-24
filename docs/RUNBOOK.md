@@ -1563,7 +1563,93 @@ Schema is in `supabase/migrations/0014_saved_places.sql` — apply via
 
 ---
 
-## 36. Phase 3 (not built — deferred to post-MVP)
+## 36. SOS emergency button
+
+Safety feature every India ride-hailing app has (regulatory + user
+expectation). Customer or captain hits a red panic button during an
+active trip; alert lands in an admin-visible queue with live push to
+all admins.
+
+### Model
+
+- **`sos_alerts`** — id, profile_id, role, order_id (optional), lat,
+  lng, note, status enum (open / acknowledged / resolved / false_alarm),
+  acknowledged_by + _at, resolved_by + _at + _note, created_at.
+- **RLS:** self insert + read; admin full access.
+- **No linked ticket auto-created** — support tickets are the follow-up
+  channel; SOS is the *now* channel.
+
+### Customer / captain flow
+
+- **Red floating SOS button** appears on TrackingPage (customer) and
+  TripPage (captain) when order status is
+  `accepted` / `arrived` / `picked_up` / `in_transit`. Fixed to the
+  bottom-right so it never disappears behind the sheet.
+- **Two-step confirmation** — tap the button → bottom sheet with an
+  optional note ("driver following me", "car making me uncomfortable")
+  + a red banner reminding users to call **112** first if in immediate
+  danger.
+- **Client-side 30s cooldown** stored in localStorage — press-and-hold
+  panic doesn't spam the queue.
+- **Grabs live GPS on send**, falls back to the trip pickup if the
+  browser refuses.
+
+### Admin flow
+
+- **New `🚨 SOS` sidebar entry** at the top (above Support).
+- **Live-refreshed queue** — 10-second polling + realtime subscribe on
+  `sos:global` channel. New alerts pop in without waiting for the
+  poll.
+- **Alert card:**
+  - Open alerts get a **red left border + pulsing OPEN badge**
+  - Acknowledged alerts get amber
+  - Customer name + **tap-to-call phone link** front and centre
+  - GPS coords + **Open in Maps →** link (opens Google Maps)
+  - Two actions: **👋 Acknowledge — I'm on it** (open→acknowledged)
+    and **✓ Resolve** (opens a note modal; false-alarm checkbox for
+    accidental presses)
+- **Filter chips** — Active (open+acknowledged) / Open / Acknowledged
+  / Resolved / All. Active count in the chip label.
+
+### Endpoints
+
+| Endpoint | Notes |
+|---|---|
+| `POST /sos` | Customer/rider triggers. Broadcasts on `sos:global` + FCM push to all admin profiles |
+| `GET /admin/sos?status=active\|open\|acknowledged\|resolved\|all` | Queue with joined profile |
+| `POST /admin/sos/:id/acknowledge` | Guarded on `status='open'` (no double-take) |
+| `POST /admin/sos/:id/resolve` | Body: `{note?, false_alarm?}` |
+| `GET /admin/sos/counts` | Sidebar badge counts |
+
+### Realtime + push chain
+
+1. Customer/rider hits SOS → POST /sos writes the row + fires two
+   fire-and-forget calls:
+2. `broadcast(env, 'sos:global', 'alert', {...})` — any admin viewing
+   the SOS page sees a new row insta-appear.
+3. `pushToAllAdmins()` — fans out FCM push notifications
+   (title `🚨 SOS from customer`) to every admin profile with a
+   registered device.
+
+### Testing checklist
+
+1. Apply migration 0015.
+2. Sign in as customer + start a demo ride (Admin → Load demo data,
+   then book a real order to reach `accepted`+ status).
+3. Red SOS button appears at bottom-right on `/track/:id`.
+4. Tap it → confirm sheet → **Send SOS** → toast confirms.
+5. In another tab, sign in as admin → `/admin/sos` → see the alert
+   with a pulsing red border.
+6. Click **Acknowledge**, then **Resolve** with a note.
+7. Verify the sub-30s cooldown: try to send another SOS from the
+   customer → toast tells you to wait.
+
+Schema is in `supabase/migrations/0015_sos_alerts.sql` — apply via
+**Actions → Apply Supabase migrations → target: sos** (or `all`).
+
+---
+
+## 37. Phase 3 (not built — deferred to post-MVP)
 
 - **Automatic UPI/bank integration** — replace the manual mark-paid
   step with a Razorpay / Cashfree webhook loop. Real-money surface,

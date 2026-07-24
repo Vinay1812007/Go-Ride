@@ -1094,6 +1094,70 @@ adminRoute.get('/support/counts', async (c) => {
   return c.json({ open: open ?? 0, assigned: assigned ?? 0, awaiting_customer: awaiting ?? 0 });
 });
 
+// ---- SOS emergency queue ----
+// GET /admin/sos?status=open|acknowledged|resolved|all — most recent first.
+adminRoute.get('/sos', async (c) => {
+  const status = c.req.query('status') ?? 'open';
+  let q = admin(c.env)
+    .from('sos_alerts')
+    .select('id, profile_id, role, order_id, lat, lng, note, status, acknowledged_by, acknowledged_at, resolved_by, resolved_at, resolution_note, created_at, profiles!sos_alerts_profile_id_fkey(full_name, phone, email)')
+    .order('created_at', { ascending: false })
+    .limit(200);
+  if (status === 'active') q = q.in('status', ['open', 'acknowledged']);
+  else if (status !== 'all') q = q.eq('status', status);
+  const { data } = await q;
+  return c.json({ alerts: data ?? [] });
+});
+
+// POST /admin/sos/:id/acknowledge — first-responder marks they're on it.
+adminRoute.post('/sos/:id/acknowledge', async (c) => {
+  const uid = c.get('userId')!;
+  const { data, error } = await admin(c.env)
+    .from('sos_alerts')
+    .update({ status: 'acknowledged', acknowledged_by: uid, acknowledged_at: new Date().toISOString() })
+    .eq('id', c.req.param('id'))
+    .eq('status', 'open')
+    .select('id')
+    .maybeSingle();
+  if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
+  if (!data) return c.json({ error: { code: 'not_found_or_taken' } }, 404);
+  return c.json({ id: data.id, status: 'acknowledged' });
+});
+
+const resolveBody = { note: '' } as const;
+// POST /admin/sos/:id/resolve  — { note?, false_alarm? }
+adminRoute.post('/sos/:id/resolve', async (c) => {
+  const body = await c.req.json().catch(() => null) as { note?: string; false_alarm?: boolean } | null;
+  const uid = c.get('userId')!;
+  const status = body?.false_alarm ? 'false_alarm' : 'resolved';
+  const { data, error } = await admin(c.env)
+    .from('sos_alerts')
+    .update({
+      status,
+      resolved_by: uid,
+      resolved_at: new Date().toISOString(),
+      resolution_note: (body?.note ?? '').trim() || null,
+    })
+    .eq('id', c.req.param('id'))
+    .in('status', ['open', 'acknowledged'])
+    .select('id')
+    .maybeSingle();
+  if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
+  if (!data) return c.json({ error: { code: 'not_found_or_resolved' } }, 404);
+  void resolveBody;
+  return c.json({ id: data.id, status });
+});
+
+// GET /admin/sos/counts — small badge for the sidebar.
+adminRoute.get('/sos/counts', async (c) => {
+  const db = admin(c.env);
+  const [{ count: open }, { count: ack }] = await Promise.all([
+    db.from('sos_alerts').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+    db.from('sos_alerts').select('id', { count: 'exact', head: true }).eq('status', 'acknowledged'),
+  ]);
+  return c.json({ open: open ?? 0, acknowledged: ack ?? 0 });
+});
+
 // ---- Dynamic surge ----
 // GET /admin/surge/current — latest snapshot per (city, service) from the
 // history table + current rate_cards state so admin sees both.
