@@ -1094,6 +1094,68 @@ adminRoute.get('/support/counts', async (c) => {
   return c.json({ open: open ?? 0, assigned: assigned ?? 0, awaiting_customer: awaiting ?? 0 });
 });
 
+// ---- Google Maps Platform health check ----
+// Runs one live probe against each Google API we integrate. Returns per-API
+// status + latency + a short response sample so admin can verify the key
+// works, credits are healthy, and the fallback isn't silently kicking in.
+adminRoute.get('/dev/google-health', async (c) => {
+  const env = c.env;
+  const configured = !!env.GOOGLE_MAPS_API_KEY;
+  if (!configured) {
+    return c.json({
+      configured: false,
+      message: 'GOOGLE_MAPS_API_KEY is not set. Every call in geo.ts is falling back to the OSM stack.',
+      checks: [],
+    });
+  }
+
+  const { googleAutocomplete, googleReverse, googleRoute, googleRouteMatrix } = await import('../lib/google');
+
+  // Hyderabad Charminar → HITEC City — a real 12km inter-city route.
+  const origin = { lat: 17.3616, lng: 78.4747 };  // Charminar
+  const dest   = { lat: 17.4487, lng: 78.3838 };  // HITEC City
+
+  async function probe(name: string, fn: () => Promise<unknown>) {
+    const started = Date.now();
+    try {
+      const result = await fn();
+      return { name, ok: true, ms: Date.now() - started, sample: summarise(result) };
+    } catch (e) {
+      return { name, ok: false, ms: Date.now() - started, error: (e as Error).message };
+    }
+  }
+
+  // Run all probes in parallel to keep the whole health check under ~2s.
+  const [autocomplete, reverse, routeCheck, matrix] = await Promise.all([
+    probe('places_autocomplete', () => googleAutocomplete(env, 'Paradise Biryani Hyderabad', 'in')),
+    probe('reverse_geocoding',   () => googleReverse(env, origin.lat, origin.lng)),
+    probe('routes_v2',           () => googleRoute(env, origin, dest)),
+    probe('route_matrix',        () => googleRouteMatrix(env, [origin, dest], [dest])),
+  ]);
+
+  const checks = [autocomplete, reverse, routeCheck, matrix];
+  const anyFailed = checks.some((c) => !c.ok);
+
+  return c.json({
+    configured: true,
+    all_ok: !anyFailed,
+    message: anyFailed
+      ? 'One or more Google APIs failed. Check the Google Cloud Console → APIs & Services → Enabled APIs. Any check that failed is currently using the OSM fallback in production.'
+      : 'All Google APIs healthy. Autocomplete + Geocoding + Routes + Matrix all responded.',
+    checks,
+  });
+});
+
+function summarise(v: unknown): unknown {
+  if (Array.isArray(v)) return { count: v.length, first: v[0] };
+  if (typeof v === 'object' && v !== null) {
+    // Show at most 4 keys so the response stays small.
+    const entries = Object.entries(v).slice(0, 4);
+    return Object.fromEntries(entries);
+  }
+  return v;
+}
+
 // ---- SOS emergency queue ----
 // GET /admin/sos?status=open|acknowledged|resolved|all — most recent first.
 adminRoute.get('/sos', async (c) => {

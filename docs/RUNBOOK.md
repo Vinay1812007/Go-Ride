@@ -1717,8 +1717,15 @@ dispatch decision behind it uses Google's data when available.
   doesn't kill Google for the whole session; the *next* call tries
   Google again.
 
-### Monitoring credit spend
+### Monitoring + testing
 
+- **Admin → Google Maps** page (`/admin/google`) runs 4 live probes
+  in parallel (Autocomplete "Paradise Biryani Hyderabad", Reverse
+  Geocode Charminar coords, Routes Charminar → HITEC City, Route
+  Matrix over the same pair) and shows red/green per API with
+  response times + response samples. Costs ~4 requests per run.
+  Click **Re-run** any time to verify the key is still healthy.
+  Backend: `GET /admin/dev/google-health`.
 - **Google Cloud Console → APIs & Services → Metrics** shows real-
   time request counts per API per day, and billing shows spend
   against the $200/mo free credit.
