@@ -1310,7 +1310,32 @@ Add tests by dropping a `*.spec.ts` under `tests/e2e/`; gate on
 
 ---
 
-## 31. Phase 3 (not built — deferred to post-MVP)
+## 31. Captain leaderboards
+
+Gamification layer on top of the existing `transactions` ledger — no
+schema change needed.
+
+- **New page at `/captain/leaderboard`.** Podium (top 3) + rows 4–20 +
+  a "You are #NN" callout if the caller is outside the top 20.
+- **Toggle:** metric (earnings / trips) × period (week / month).
+- **Privacy:** names shown as first name + last initial ("Vinay K.").
+  Full names would be uncomfortable on a public-ish board.
+- **Entry point:** yellow gradient card on the Captain home
+  ("🏆 This week's leaderboard") next to the earnings widget.
+
+Endpoint: `GET /riders/leaderboard?metric=earnings|trips&period=week|month&city=`.
+Aggregates in memory from `transactions.type='trip_earning'` in the
+window; joins to `orders.city` for the optional city filter. Returns
+top 20 with rank/name/vehicle/trips/earnings + the caller's own row
+if they're outside the top 20 (with total_participants for context).
+
+At MVP scale this is a full scan of the period's trip_earning rows —
+fine for a few hundred trips a day. At real volume we'd move to a
+nightly materialised view refreshed by a cron.
+
+---
+
+## 32. Phase 3 (not built — deferred to post-MVP)
 
 - **Automatic UPI/bank integration** — replace the manual mark-paid
   step with a Razorpay / Cashfree webhook loop. Real-money surface,
@@ -1318,5 +1343,10 @@ Add tests by dropping a `*.spec.ts` under `tests/e2e/`; gate on
 - **Native iOS APK** — needs Apple Developer account + APNs cert.
 - More e2e coverage (full customer → captain trip flow) — needs a
   test data seeder that resets between runs.
+- **Dynamic surge pricing** — schema already has `surge_multiplier`
+  on rate_cards; needs a rules engine or cron that adjusts based on
+  demand/supply gap per city.
+- **Chat with support agents** — new admin-support role + queue
+  routing + inbox UI.
 
 Say what you want to tackle next.

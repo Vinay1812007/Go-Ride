@@ -259,6 +259,120 @@ riders.get('/earnings.csv', requireAuth, requireRole('rider'), async (c) => {
 
 function round2(n: number): number { return Math.round(n * 100) / 100; }
 
+// GET /riders/leaderboard?metric=earnings|trips&period=week|month&city=
+//
+// Top 20 captains by the chosen metric in the chosen period. If the caller
+// is a captain and outside the top 20, also returns their own rank.
+// Privacy: display name is first name + last initial ("Vinay K.") — full
+// names would be uncomfortable in a public-ish leaderboard.
+riders.get('/leaderboard', requireAuth, requireRole('rider'), async (c) => {
+  const uid = c.get('userId')!;
+  const metric  = (c.req.query('metric')  ?? 'earnings') as 'earnings' | 'trips';
+  const period  = (c.req.query('period')  ?? 'week')     as 'week' | 'month';
+  const cityQ   = c.req.query('city');
+  const db = admin(c.env);
+
+  // Time window
+  const now = new Date();
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+  const daysSinceMonday = (now.getDay() + 6) % 7;
+  const startOfWeek = startOfToday - daysSinceMonday * 86400_000;
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
+  const since = new Date(period === 'week' ? startOfWeek : startOfMonth).toISOString();
+
+  // Pull rider-owned trip_earning transactions in the window.
+  // NOTE: This scans all trip_earnings in the period — fine at MVP scale
+  // (few hundred/day). At real volume we'd move to a materialised view.
+  const { data: txns } = await db
+    .from('transactions')
+    .select('rider_id, amount, order_id, orders(city)')
+    .eq('type', 'trip_earning')
+    .gte('created_at', since)
+    .not('rider_id', 'is', null)
+    .limit(50_000);
+
+  // Aggregate per rider, honouring the optional city filter.
+  const aggr = new Map<string, { earnings: number; trips: number }>();
+  for (const t of txns ?? []) {
+    if (!t.rider_id) continue;
+    if (cityQ) {
+      const o = Array.isArray(t.orders) ? t.orders[0] : t.orders;
+      if (o?.city?.toLowerCase() !== cityQ.toLowerCase()) continue;
+    }
+    const row = aggr.get(t.rider_id) ?? { earnings: 0, trips: 0 };
+    row.earnings += Number(t.amount);
+    row.trips += 1;
+    aggr.set(t.rider_id, row);
+  }
+
+  const scored = Array.from(aggr, ([rider_id, v]) => ({
+    rider_id,
+    earnings: round2(v.earnings),
+    trips: v.trips,
+    score: metric === 'trips' ? v.trips : v.earnings,
+  })).sort((a, b) => b.score - a.score);
+
+  if (scored.length === 0) {
+    return c.json({ metric, period, city: cityQ ?? null, top: [], me: null });
+  }
+
+  // Join name + vehicle for the top 20 + the caller (if outside top 20).
+  const top = scored.slice(0, 20);
+  const myScoreIdx = scored.findIndex((s) => s.rider_id === uid);
+  const meScore = myScoreIdx >= 0 ? scored[myScoreIdx] : null;
+  const includeMe = meScore && !top.some((t) => t.rider_id === uid);
+
+  const idsToFetch = new Set<string>(top.map((t) => t.rider_id));
+  if (includeMe && meScore) idsToFetch.add(meScore.rider_id);
+
+  const { data: riderRows } = await db
+    .from('riders')
+    .select('id, vehicle_type, profiles!inner(full_name)')
+    .in('id', Array.from(idsToFetch));
+
+  const nameFor = (id: string): string => {
+    const r = (riderRows ?? []).find((x) => x.id === id);
+    // Supabase-js returns joined 'profiles' as either object or array
+    const p = Array.isArray((r as any)?.profiles) ? (r as any).profiles[0] : (r as any)?.profiles;
+    const full = p?.full_name as string | undefined;
+    return anonymise(full);
+  };
+  const vehicleFor = (id: string): string | undefined =>
+    (riderRows ?? []).find((x) => x.id === id)?.vehicle_type;
+
+  const topOut = top.map((t, i) => ({
+    rank: i + 1,
+    rider_id: t.rider_id,
+    display_name: nameFor(t.rider_id),
+    vehicle_type: vehicleFor(t.rider_id),
+    trips: t.trips,
+    earnings: t.earnings,
+    is_me: t.rider_id === uid,
+  }));
+
+  const me = meScore ? {
+    rank: myScoreIdx + 1,
+    rider_id: meScore.rider_id,
+    display_name: nameFor(meScore.rider_id),
+    vehicle_type: vehicleFor(meScore.rider_id),
+    trips: meScore.trips,
+    earnings: meScore.earnings,
+    is_me: true,
+    total_participants: scored.length,
+  } : null;
+
+  return c.json({ metric, period, city: cityQ ?? null, top: topOut, me });
+});
+
+// First name + last initial. Falls back to "Captain" if the name is missing.
+function anonymise(fullName?: string): string {
+  if (!fullName?.trim()) return 'Captain';
+  const parts = fullName.trim().split(/\s+/);
+  const first = parts[0] ?? 'Captain';
+  const last = parts.length > 1 ? parts[parts.length - 1]![0] + '.' : '';
+  return last ? `${first} ${last}` : first;
+}
+
 // Captain's own payout history — most recent first.
 riders.get('/payouts', requireAuth, requireRole('rider'), async (c) => {
   const uid = c.get('userId')!;

@@ -12,6 +12,7 @@ import OnboardPage from './OnboardPage';
 import TripPage from './TripPage';
 import OfferCard from './OfferCard';
 import EarningsPage from './EarningsPage';
+import LeaderboardPage from './LeaderboardPage';
 import { useOffers } from './hooks/useOffers';
 import { useRiderGps } from './hooks/useRiderGps';
 import LoadingScreen from '@/components/ui/LoadingScreen';
@@ -274,6 +275,19 @@ function HomePage({ me, refresh }: { me: MeResponse | null; refresh: () => Promi
           </div>
         </NavLink>
 
+        {/* Leaderboard shortcut */}
+        <NavLink
+          to="/captain/leaderboard"
+          className="card flex items-center gap-3 hover:shadow-lg transition bg-gradient-to-r from-brand-50 to-white"
+        >
+          <div className="text-2xl">🏆</div>
+          <div className="flex-1">
+            <div className="text-sm font-semibold">This week's leaderboard</div>
+            <div className="text-xs text-slate-500">See how you rank against other captains</div>
+          </div>
+          <span className="text-brand-800 font-bold">→</span>
+        </NavLink>
+
         <p className="text-center text-xs text-slate-400 pt-2">
           Pull to refresh. Offers arrive automatically while online.
         </p>
@@ -303,6 +317,7 @@ export default function CaptainShell() {
       <Route path="onboard" element={<OnboardPage />} />
       <Route path="trip/:orderId" element={<TripPageWithGps />} />
       <Route path="earnings" element={<EarningsPage />} />
+      <Route path="leaderboard" element={<LeaderboardPage />} />
       <Route path="*" element={<Navigate to="/captain" replace />} />
     </Routes>
   );
