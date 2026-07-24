@@ -44,6 +44,101 @@ adminRoute.get('/stats', async (c) => {
   return c.json({ online_riders: onlineRiders ?? 0, active_orders: activeOrders ?? 0, revenue_today: Math.round(revenueToday) });
 });
 
+// GET /admin/ops-dashboard — one consolidated payload for the control tower
+// view. Everything the admin Dashboard needs in one fetch to keep the
+// 15-second refresh cheap.
+adminRoute.get('/ops-dashboard', async (c) => {
+  const db = admin(c.env);
+  const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
+  const dayAgo = new Date(Date.now() - 24 * 3600_000);
+
+  const [
+    { count: onlineRiders },
+    { count: onTripRiders },
+    { count: activeOrders },
+    { count: searchingOrders },
+    { data: today },
+    { count: failedToday },
+    { count: cancelledToday },
+    { count: openTickets },
+    { count: awaitingTickets },
+    { count: pendingPayouts },
+    { data: pendingPayoutSum },
+    { data: surgeCards },
+    { data: recentActive },
+    { data: liveCaptains },
+    { data: recentCancels },
+    { data: last24hOrders },
+  ] = await Promise.all([
+    db.from('riders').select('id', { count: 'exact', head: true }).eq('status', 'online'),
+    db.from('riders').select('id', { count: 'exact', head: true }).eq('status', 'on_trip'),
+    db.from('orders').select('id', { count: 'exact', head: true }).in('status', ['accepted', 'arrived', 'picked_up', 'in_transit']),
+    db.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'searching'),
+    db.from('orders').select('fare_final').in('status', ['completed', 'delivered']).gte('completed_at', startOfToday.toISOString()),
+    db.from('orders').select('id', { count: 'exact', head: true }).eq('status', 'no_rider_found').gte('created_at', startOfToday.toISOString()),
+    db.from('orders').select('id', { count: 'exact', head: true }).in('status', ['cancelled_customer', 'cancelled_rider']).gte('created_at', startOfToday.toISOString()),
+    db.from('support_tickets').select('id', { count: 'exact', head: true }).eq('status', 'open'),
+    db.from('support_tickets').select('id', { count: 'exact', head: true }).eq('status', 'awaiting_customer'),
+    db.from('payouts').select('id', { count: 'exact', head: true }).eq('status', 'pending'),
+    db.from('payouts').select('net').eq('status', 'pending'),
+    db.from('rate_cards').select('city, service, surge_multiplier, auto_surge').eq('active', true).gt('surge_multiplier', 1.0),
+    db.from('orders').select('id, order_no, service, status, city, pickup_address, drop_address, fare_estimate, created_at, accepted_at')
+      .in('status', ['searching', 'accepted', 'arrived', 'picked_up', 'in_transit'])
+      .order('created_at', { ascending: false }).limit(10),
+    db.from('riders').select('id, city, vehicle_type, status, last_lat, last_lng, last_seen, profiles!inner(full_name)')
+      .in('status', ['online', 'on_trip'])
+      .order('last_seen', { ascending: false }).limit(10),
+    db.from('orders').select('id, order_no, service, status, cancelled_reason, cancelled_at, fare_estimate')
+      .in('status', ['cancelled_customer', 'cancelled_rider'])
+      .order('cancelled_at', { ascending: false }).limit(5),
+    db.from('orders').select('created_at, status')
+      .gte('created_at', dayAgo.toISOString())
+      .limit(5000),
+  ]);
+
+  const revenueToday   = (today ?? []).reduce((s, o) => s + Number(o.fare_final ?? 0), 0);
+  const pendingPayable = (pendingPayoutSum ?? []).reduce((s, p) => s + Number(p.net ?? 0), 0);
+
+  // 24-hour orders histogram, 24 buckets of 1h ending "now".
+  const buckets = new Array<{ hour: string; total: number; failed: number; cancelled: number }>(24);
+  const nowMs = Date.now();
+  for (let i = 23; i >= 0; i--) {
+    const endMs = nowMs - i * 3600_000;
+    buckets[23 - i] = { hour: new Date(endMs).toISOString().slice(11, 13) + ':00', total: 0, failed: 0, cancelled: 0 };
+  }
+  for (const o of last24hOrders ?? []) {
+    const hoursAgo = Math.floor((nowMs - new Date(o.created_at).getTime()) / 3600_000);
+    if (hoursAgo < 0 || hoursAgo > 23) continue;
+    const idx = 23 - hoursAgo;
+    const b = buckets[idx]!;
+    b.total++;
+    if (o.status === 'no_rider_found') b.failed++;
+    if (o.status === 'cancelled_customer' || o.status === 'cancelled_rider') b.cancelled++;
+  }
+
+  return c.json({
+    kpi: {
+      online_riders:      onlineRiders    ?? 0,
+      on_trip_riders:     onTripRiders    ?? 0,
+      active_orders:      activeOrders    ?? 0,
+      searching_orders:   searchingOrders ?? 0,
+      revenue_today:      Math.round(revenueToday),
+      failed_today:       failedToday     ?? 0,
+      cancelled_today:    cancelledToday  ?? 0,
+      open_tickets:       openTickets     ?? 0,
+      awaiting_tickets:   awaitingTickets ?? 0,
+      pending_payouts:    pendingPayouts  ?? 0,
+      pending_payable:    Math.round(pendingPayable),
+      surge_hot_cards:    (surgeCards ?? []).length,
+    },
+    surge:             surgeCards      ?? [],
+    active_orders:     recentActive    ?? [],
+    live_captains:     liveCaptains    ?? [],
+    recent_cancels:    recentCancels   ?? [],
+    orders_24h:        buckets,
+  });
+});
+
 // ---- Rate card CRUD ----
 adminRoute.get('/rate-cards', async (c) => {
   const { data } = await admin(c.env).from('rate_cards').select('*').order('city').order('service');

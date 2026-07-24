@@ -1478,7 +1478,51 @@ via **Actions → Apply Supabase migrations → target: support-tickets**
 
 ---
 
-## 34. Phase 3 (not built — deferred to post-MVP)
+## 34. Admin operations dashboard
+
+Replaces the sparse 3-KPI admin home with a proper control-tower view.
+One consolidated `GET /admin/ops-dashboard` fetch keeps the 15-second
+auto-refresh cheap.
+
+### Layout
+
+- **6 KPI tiles** (top row) — Online captains (with on-trip sub-count),
+  Active orders (with searching sub-count), Revenue today, Cancelled
+  today (amber if >0), Failed today (red if >0), Hot surge cards
+  (amber if >0).
+- **2 queue cards** — Support (Open + Awaiting-customer counts, links
+  to `/admin/support`) and Payouts (Pending count + total payable,
+  links to `/admin/payouts`).
+- **24-hour orders histogram** — 24 stacked bars per hour, brand-
+  yellow (completed / in-progress), red (no-captain-found), grey
+  (cancelled). Title-tooltip per bar with the breakdown.
+- **Live orders list** (last 10 active) with status pill + fare + link
+  to full orders page.
+- **Live captains list** (last 10 online / on-trip) with green/blue
+  status dot + link to the live map.
+- **Hot surge chips** — every rate card currently above 1.0×, colour-
+  coded (amber >1× / red ≥1.5×), tagged AUTO if that card uses
+  dynamic surge.
+- **Recent cancellations feed** — last 5 with reason + timeAgo.
+- **Demo data controls** (kept) at the bottom.
+
+### Endpoint
+
+`GET /admin/ops-dashboard` — everything above in one payload:
+
+- `kpi` — 12 counters
+- `surge` — active `> 1.0×` rate cards
+- `active_orders` — 10 most-recent live orders
+- `live_captains` — 10 most-recently-seen online/on-trip riders
+- `recent_cancels` — 5 most-recent cancellations
+- `orders_24h` — 24 hourly buckets `{hour, total, failed, cancelled}`
+
+Ran in parallel via `Promise.all` — one round trip to the DB. At
+pilot scale (few hundred orders/day) this stays under 50ms.
+
+---
+
+## 35. Phase 3 (not built — deferred to post-MVP)
 
 - **Automatic UPI/bank integration** — replace the manual mark-paid
   step with a Razorpay / Cashfree webhook loop. Real-money surface,
