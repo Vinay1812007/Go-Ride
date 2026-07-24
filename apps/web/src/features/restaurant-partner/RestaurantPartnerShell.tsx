@@ -11,6 +11,7 @@ import Skeleton from '@/components/ui/Skeleton';
 import PartnerOrdersPage from './PartnerOrdersPage';
 import PartnerMenuPage from './PartnerMenuPage';
 import PartnerInfoPage from './PartnerInfoPage';
+import PartnerAnalyticsPage from './PartnerAnalyticsPage';
 
 interface Me {
   profile: { id: string; full_name: string; email?: string | null; phone?: string | null };
@@ -81,9 +82,10 @@ export default function RestaurantPartnerShell() {
       <nav className="bg-white border-b border-surface-border sticky top-0 z-10">
         <div className="max-w-3xl mx-auto flex">
           {[
-            { to: '/partner',      label: 'Orders' },
-            { to: '/partner/menu', label: 'Menu' },
-            { to: '/partner/info', label: 'Info' },
+            { to: '/partner',           label: 'Orders' },
+            { to: '/partner/menu',      label: 'Menu' },
+            { to: '/partner/analytics', label: 'Analytics' },
+            { to: '/partner/info',      label: 'Info' },
           ].map((t) => (
             <NavLink
               key={t.to}
@@ -105,6 +107,7 @@ export default function RestaurantPartnerShell() {
         <Routes>
           <Route index element={<PartnerOrdersPage />} />
           <Route path="menu" element={<PartnerMenuPage restaurantId={me.restaurant.id} onChange={refresh} />} />
+          <Route path="analytics" element={<PartnerAnalyticsPage />} />
           <Route path="info" element={<PartnerInfoPage restaurant={me.restaurant} onChange={refresh} />} />
           <Route path="*" element={<Navigate to="/partner" replace />} />
         </Routes>

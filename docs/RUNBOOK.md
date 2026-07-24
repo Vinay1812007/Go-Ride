@@ -1235,11 +1235,88 @@ via **Actions → Apply Supabase migrations → target: restaurant-partners**
 
 ---
 
-## 29. Phase 3 (not built)
+## 29. Restaurant partner analytics
 
-- Native iOS APK (needs Apple Developer account + APNs cert).
-- Playwright end-to-end tests for the critical flows.
-- Automatic UPI/bank integration (replace the manual mark-paid step).
-- Restaurant partner analytics (weekly revenue graph, item-level demand).
+New **Analytics** tab on the partner portal, between Menu and Info.
+
+- **Three-bucket hero** — Today / This week (Mon-based) / This month,
+  each with revenue + order count.
+- **Daily revenue chart** — 7 / 30 / 90-day range toggle; yellow bars
+  scaled to the highest-revenue day, low days grey stubs, title-tooltip
+  per bar with `YYYY-MM-DD · ₹N · X orders`.
+- **Top items** — up to 10 items ordered by units sold in the window,
+  with a horizontal fill bar (qty vs max) + revenue on the right. Data
+  comes from the `orders.food_details` JSON snapshot, so this is
+  historical-accurate even if the item was later renamed / repriced.
+- **Hour-of-day chart** — 24 mini bars showing peak order times over
+  the window. Useful for staffing decisions.
+- **Order status split** — chip row with counts per status
+  (completed, cancelled_customer, in_transit, …).
+
+All computed in memory on the Worker in a single query — restaurants are
+small enough that even a 90-day scan is trivial.
+
+Endpoint: `GET /partner-restaurant/analytics?days=30`.
+
+---
+
+## 30. Playwright end-to-end smoke tests
+
+`tests/` — separate workspace (not in `apps/*` so Playwright's ~150 MB
+chromium doesn't install on every root `npm i`). Deliberately narrow:
+poke each Pages project's public surface (auth page, developer docs,
+public tracking) and assert the app renders + expected copy is present.
+
+### Run locally
+
+```bash
+cd tests
+npm install
+npx playwright install chromium --with-deps    # one-time
+npm test
+```
+
+Three Playwright projects — customer / captain / admin — fan out across
+the corresponding Pages URLs. Override with env vars for preview
+branches:
+
+```bash
+GORIDE_URL_CUSTOMER=https://preview-abc.goride-web.pages.dev npm test
+```
+
+### Signed-in tests
+
+The admin role-mismatch check needs a live customer account:
+
+```bash
+export GORIDE_E2E_CUSTOMER_EMAIL=…
+export GORIDE_E2E_CUSTOMER_PASSWORD=…
+```
+
+Skipped automatically when unset.
+
+### CI
+
+`.github/workflows/e2e.yml` runs on **manual dispatch only**, never on
+push. Rationale: silent smoke failures between merge and someone
+noticing are worse than no CI. Trigger via Actions → **E2E smoke** →
+Run workflow.
+
+Overridable inputs on the dispatch dialog for preview URLs. Failed
+runs upload the Playwright HTML report as an artifact for 7 days.
+
+Add tests by dropping a `*.spec.ts` under `tests/e2e/`; gate on
+`testInfo.project.name` to scope to one project.
+
+---
+
+## 31. Phase 3 (not built — deferred to post-MVP)
+
+- **Automatic UPI/bank integration** — replace the manual mark-paid
+  step with a Razorpay / Cashfree webhook loop. Real-money surface,
+  needs a merchant account + audit. **Deferred to after MVP validation.**
+- **Native iOS APK** — needs Apple Developer account + APNs cert.
+- More e2e coverage (full customer → captain trip flow) — needs a
+  test data seeder that resets between runs.
 
 Say what you want to tackle next.

@@ -147,4 +147,100 @@ partnerRest.patch('/restaurant', async (c) => {
   return c.json({ restaurant: data });
 });
 
+// GET /analytics?days=30 — pre-aggregated dashboard payload:
+//   • daily revenue + order-count timeline
+//   • top items by quantity + revenue
+//   • hour-of-day distribution (0-23)
+//   • order status split
+// Everything computed in memory here — restaurants are small enough that
+// even a 90-day scan is trivial (a handful of hundred rows).
+partnerRest.get('/analytics', async (c) => {
+  const rid = await myRestaurantId(c);
+  if (!rid) return c.json({ error: { code: 'no_restaurant' } }, 404);
+  const days = Math.min(90, Math.max(1, parseInt(c.req.query('days') ?? '30', 10)));
+  const since = new Date(Date.now() - days * 86400_000);
+
+  const { data: orders } = await admin(c.env)
+    .from('orders')
+    .select('id, status, food_details, fare_estimate, fare_final, created_at, completed_at')
+    .eq('restaurant_id', rid)
+    .gte('created_at', since.toISOString())
+    .limit(10_000);
+
+  const rows = orders ?? [];
+  const isDone = (s: string) => s === 'completed' || s === 'delivered';
+
+  // Timeline: last N days, ascending
+  const startOfToday = new Date(new Date().setHours(0, 0, 0, 0)).getTime();
+  const perDay = new Map<string, { revenue: number; orders: number }>();
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(startOfToday - i * 86400_000).toISOString().slice(0, 10);
+    perDay.set(d, { revenue: 0, orders: 0 });
+  }
+
+  const perItem = new Map<string, { name: string; qty: number; revenue: number }>();
+  const perHour = new Array<number>(24).fill(0);
+  const statusCounts: Record<string, number> = {};
+  let totalRevenue = 0, totalOrders = 0;
+  let todayOrders = 0, todayRevenue = 0;
+  let weekOrders = 0, weekRevenue = 0;
+  const day = new Date().getDay();
+  const daysSinceMonday = (day + 6) % 7;
+  const startOfWeek = startOfToday - daysSinceMonday * 86400_000;
+  const startOfMonth = new Date(new Date().getFullYear(), new Date().getMonth(), 1).getTime();
+  let monthOrders = 0, monthRevenue = 0;
+
+  for (const o of rows) {
+    statusCounts[o.status] = (statusCounts[o.status] ?? 0) + 1;
+    if (!isDone(o.status)) continue;
+    const ts = new Date(o.created_at).getTime();
+    const revenue = Number(o.fare_final ?? o.fare_estimate ?? 0);
+    totalRevenue += revenue; totalOrders++;
+    if (ts >= startOfToday) { todayOrders++; todayRevenue += revenue; }
+    if (ts >= startOfWeek)  { weekOrders++;  weekRevenue  += revenue; }
+    if (ts >= startOfMonth) { monthOrders++; monthRevenue += revenue; }
+
+    const dayKey = new Date(o.created_at).toISOString().slice(0, 10);
+    const bucket = perDay.get(dayKey);
+    if (bucket) { bucket.revenue += revenue; bucket.orders += 1; }
+
+    const hour = new Date(o.created_at).getHours();
+    perHour[hour] = (perHour[hour] ?? 0) + 1;
+
+    // Item aggregation from the food_details JSON snapshot.
+    const fd = o.food_details as { items?: Array<{ menu_item_id: string; name: string; qty: number; price: number }> } | null;
+    for (const it of fd?.items ?? []) {
+      const key = it.menu_item_id;
+      const row = perItem.get(key) ?? { name: it.name, qty: 0, revenue: 0 };
+      row.qty += it.qty;
+      row.revenue += Number(it.price) * it.qty;
+      perItem.set(key, row);
+    }
+  }
+
+  const timeline = Array.from(perDay, ([date, v]) => ({
+    date,
+    revenue: Math.round(v.revenue * 100) / 100,
+    orders: v.orders,
+  }));
+
+  const topItems = Array.from(perItem, ([id, v]) => ({ id, ...v, revenue: Math.round(v.revenue * 100) / 100 }))
+    .sort((a, b) => b.qty - a.qty)
+    .slice(0, 10);
+
+  return c.json({
+    days,
+    totals: {
+      today:      { orders: todayOrders, revenue: Math.round(todayRevenue * 100) / 100 },
+      this_week:  { orders: weekOrders,  revenue: Math.round(weekRevenue  * 100) / 100 },
+      this_month: { orders: monthOrders, revenue: Math.round(monthRevenue * 100) / 100 },
+      window:     { orders: totalOrders, revenue: Math.round(totalRevenue * 100) / 100 },
+    },
+    timeline,
+    top_items: topItems,
+    hour_distribution: perHour,   // index = hour 0-23, value = order count
+    status_counts: statusCounts,
+  });
+});
+
 export default partnerRest;
