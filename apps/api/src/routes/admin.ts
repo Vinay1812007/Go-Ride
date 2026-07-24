@@ -9,6 +9,8 @@ import {
   walletCreditBody,
   restaurantUpsertBody,
   menuItemUpsertBody,
+  markPayoutPaidBody,
+  runPayoutsBody,
 } from '../lib/schemas';
 import { dispatch } from '../lib/dispatch';
 import { haversineKm } from '../lib/geo';
@@ -794,6 +796,86 @@ adminRoute.delete('/restaurants/:id/menu/:itemId', async (c) => {
     .eq('restaurant_id', c.req.param('id'));
   if (error) return c.json({ error: { code: 'delete_failed', message: error.message } }, 500);
   return c.json({ ok: true });
+});
+
+// ---- Payouts ----
+// GET /admin/payouts?status=pending|paid|all — list of payouts with the
+// rider's profile joined so the table can show a name. Defaults to pending
+// because that's the queue that needs action.
+adminRoute.get('/payouts', async (c) => {
+  const status = c.req.query('status') ?? 'pending';
+  let q = admin(c.env)
+    .from('payouts')
+    .select('id, rider_id, period_start, period_end, gross, commission, net, trips, status, bank_ref, note, paid_at, created_at, riders(vehicle_number, vehicle_type, profiles!inner(full_name, email, phone))')
+    .order('period_start', { ascending: false })
+    .limit(500);
+  if (status !== 'all') q = q.eq('status', status);
+  const { data } = await q;
+  return c.json({ payouts: data ?? [] });
+});
+
+// POST /admin/payouts/run — manually kick a run (defaults to the previous
+// week window). Idempotent thanks to (rider_id, period_start, period_end)
+// unique constraint and the payout_transactions.transaction_id unique idx.
+adminRoute.post('/payouts/run', async (c) => {
+  const body = await parse(c, runPayoutsBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const { data, error } = await admin(c.env).rpc('run_payouts', {
+    p_from: body.from ?? null,
+    p_to:   body.to   ?? null,
+  });
+  if (error) return c.json({ error: { code: 'run_failed', message: error.message } }, 500);
+  return c.json({ created: Number(data ?? 0) });
+});
+
+// POST /admin/payouts/:id/mark-paid — record bank_ref + flip status to paid.
+adminRoute.post('/payouts/:id/mark-paid', async (c) => {
+  const body = await parse(c, markPayoutPaidBody);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const uid = c.get('userId')!;
+  const { data, error } = await admin(c.env)
+    .from('payouts')
+    .update({
+      status: 'paid',
+      bank_ref: body.bank_ref,
+      note: body.note ?? null,
+      paid_at: new Date().toISOString(),
+      paid_by: uid,
+    })
+    .eq('id', c.req.param('id'))
+    .eq('status', 'pending')   // guard: don't re-pay an already-paid one
+    .select('id')
+    .maybeSingle();
+  if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
+  if (!data) return c.json({ error: { code: 'not_found_or_already_paid' } }, 404);
+  return c.json({ id: data.id, status: 'paid' });
+});
+
+// POST /admin/payouts/:id/cancel — soft-cancel a payout (rare — mistaken run).
+// The linked payout_transactions rows are removed by the cascade, freeing
+// those transactions for the next run.
+adminRoute.post('/payouts/:id/cancel', async (c) => {
+  const { data, error } = await admin(c.env)
+    .from('payouts')
+    .update({ status: 'cancelled' })
+    .eq('id', c.req.param('id'))
+    .eq('status', 'pending')
+    .select('id')
+    .maybeSingle();
+  if (error) return c.json({ error: { code: 'save_failed', message: error.message } }, 500);
+  if (!data) return c.json({ error: { code: 'not_found_or_already_paid' } }, 404);
+  // Delete the junction so those transactions can be paid in a future run.
+  await admin(c.env).from('payout_transactions').delete().eq('payout_id', data.id);
+  return c.json({ id: data.id, status: 'cancelled' });
+});
+
+// GET /admin/payouts/:id/transactions — the trip-level breakdown of a payout.
+adminRoute.get('/payouts/:id/transactions', async (c) => {
+  const { data } = await admin(c.env)
+    .from('payout_transactions')
+    .select('transaction_id, transactions!inner(id, type, amount, created_at, order_id, orders(order_no, service, pickup_address, drop_address, distance_km, fare_final))')
+    .eq('payout_id', c.req.param('id'));
+  return c.json({ items: data ?? [] });
 });
 
 export default adminRoute;

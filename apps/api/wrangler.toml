@@ -13,9 +13,12 @@ workers_dev = true
 binding = "CACHE"
 id = "REPLACE_WITH_KV_ID"
 
-# Scheduled prune of rider_locations (daily) + expired job offers (every minute).
+# Schedules:
+#   every minute       — sweep expired offers, widen dispatch, promote scheduled
+#   0 3 * * *          — prune rider_locations older than 24h
+#   0 4 * * 1          — Monday 04:00 UTC weekly payout run
 [triggers]
-crons = ["* * * * *", "0 3 * * *"]
+crons = ["* * * * *", "0 3 * * *", "0 4 * * 1"]
 
 # Public environment vars (non-secret; put secrets via `wrangler secret put`).
 [vars]

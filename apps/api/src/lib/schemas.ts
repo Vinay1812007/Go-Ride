@@ -197,6 +197,18 @@ export const restaurantUpsertBody = z.object({
   active: z.boolean().default(true),
 });
 
+// Admin: mark a payout as paid
+export const markPayoutPaidBody = z.object({
+  bank_ref: z.string().min(3).max(80),
+  note: z.string().max(300).optional(),
+});
+
+// Admin: run payouts manually — window is optional, defaults to previous week
+export const runPayoutsBody = z.object({
+  from: z.string().datetime().optional(),
+  to:   z.string().datetime().optional(),
+}).default({});
+
 // Admin: upsert a menu item
 export const menuItemUpsertBody = z.object({
   id: z.string().uuid().optional(),

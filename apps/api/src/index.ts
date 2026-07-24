@@ -57,6 +57,20 @@ export default {
       console.log('pruned', data, 'rider_locations rows');
       return;
     }
+    // Monday 4am UTC → weekly rider payout run.
+    // run_payouts() defaults to the previous Mon-Sun window and skips any
+    // transactions already covered by an existing payout, so a duplicate
+    // firing (Cloudflare quirk) is a safe no-op.
+    if (event.cron === '0 4 * * 1') {
+      try {
+        const { data, error } = await sbAdmin(env).rpc('run_payouts', { p_from: null, p_to: null });
+        if (error) console.warn('payouts run failed', error);
+        else console.log('payouts run created', data, 'row(s)');
+      } catch (e) {
+        console.warn('payouts run threw', e);
+      }
+      return;
+    }
     // Every minute → sweep expired offers, widen dispatch, promote scheduled
     if (event.cron === '* * * * *') {
       try {

@@ -976,12 +976,74 @@ scopes rows to the calling rider.
 
 ---
 
-## 25. Phase 3 (not built)
+## 25. Driver payout batching
+
+Weekly settlement of rider earnings — every Monday 04:00 UTC a Worker
+cron folds the previous Mon-Sun window of trip_earning + commission
+transactions per rider into one `payouts` row. Admin then marks each
+row paid with the bank reference once the transfer clears.
+
+### Model
+
+- **`payouts`** — one row per rider per pay period. Columns: rider_id,
+  period_start, period_end, gross, commission, net, trips, status
+  (`pending` | `paid` | `failed` | `cancelled`), bank_ref, note,
+  paid_at, paid_by.
+- **`payout_transactions`** — junction table linking a payout to the
+  exact transaction rows it settled. The unique constraint on
+  `transaction_id` guarantees the same trip earning can never be
+  paid twice.
+- **`run_payouts(from, to)`** — Postgres function that computes the
+  window, aggregates per-rider from unpaid transactions, and inserts
+  atomically per rider. Idempotent — an `on conflict do nothing`
+  guard on `(rider_id, period_start, period_end)` means duplicate
+  cron firings are safe.
+
+### Endpoints
+
+| Endpoint | Who | Notes |
+|---|---|---|
+| `GET /riders/payouts` | Captain (own) | Last 52 weeks |
+| `GET /admin/payouts?status=pending\|paid\|all` | Admin | Riders joined for name lookup |
+| `POST /admin/payouts/run` | Admin | On-demand batch. Optional `from` / `to` ISO window |
+| `POST /admin/payouts/:id/mark-paid` | Admin | Requires `bank_ref` (min 3 chars) + optional `note` |
+| `POST /admin/payouts/:id/cancel` | Admin | Soft-cancel; frees the covered transactions for the next run |
+| `GET /admin/payouts/:id/transactions` | Admin | Trip-level breakdown for audit |
+
+### Cron
+
+`wrangler.toml` now has three schedules: `* * * * *` (minutely),
+`0 3 * * *` (daily prune), and `0 4 * * 1` (Monday 04:00 UTC weekly
+payout run). Handler in `apps/api/src/index.ts` calls `run_payouts`
+with null args so it defaults to the previous full ISO week.
+
+### Frontend
+
+- **Captain earnings page:** a **Payouts** strip appears whenever
+  there's at least one payout row. Shows period + net + status chip
+  + gross/commission breakdown. Paid rows include the bank reference.
+- **Admin `/admin/payouts`:** filter chip (pending / paid / all),
+  summary strip (rows, trips, gross, net), full table with per-row
+  Mark-paid modal (bank_ref + note) and Cancel button on pending
+  rows. **Run now** button in the header triggers a manual batch —
+  safe to click even if the Monday cron already ran.
+
+### First-time setup
+
+1. Apply migration 0009 (`Actions → Apply Supabase migrations → target:
+   payouts` or `all`).
+2. Redeploy the Worker so the Monday cron gets registered.
+3. Click **Run now** on the admin Payouts page to backfill any
+   already-completed transactions into a payout row.
+
+---
+
+## 26. Phase 3 (not built)
 
 - Native iOS APK (needs Apple Developer account + APNs cert).
 - Multi-city rate cards + service area polygons.
 - Restaurant partner portal (their own admin login).
 - Playwright end-to-end tests for the critical flows.
-- Driver payout batching (weekly payout runs from `transactions`).
+- Automatic UPI/bank integration (replace the manual mark-paid step).
 
 Say what you want to tackle next.

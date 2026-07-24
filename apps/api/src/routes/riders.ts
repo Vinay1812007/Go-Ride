@@ -259,6 +259,18 @@ riders.get('/earnings.csv', requireAuth, requireRole('rider'), async (c) => {
 
 function round2(n: number): number { return Math.round(n * 100) / 100; }
 
+// Captain's own payout history — most recent first.
+riders.get('/payouts', requireAuth, requireRole('rider'), async (c) => {
+  const uid = c.get('userId')!;
+  const { data } = await admin(c.env)
+    .from('payouts')
+    .select('id, period_start, period_end, gross, commission, net, trips, status, bank_ref, note, paid_at, created_at')
+    .eq('rider_id', uid)
+    .order('period_start', { ascending: false })
+    .limit(52);
+  return c.json({ payouts: data ?? [] });
+});
+
 // Pending offers for me (fallback if realtime missed)
 riders.get('/offers', requireAuth, requireRole('rider'), async (c) => {
   const uid = c.get('userId')!;

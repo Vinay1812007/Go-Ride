@@ -37,6 +37,21 @@ interface TripRow {
   completed_at?: string;
 }
 
+interface Payout {
+  id: string;
+  period_start: string;
+  period_end: string;
+  gross: number;
+  commission: number;
+  net: number;
+  trips: number;
+  status: 'pending' | 'paid' | 'failed' | 'cancelled';
+  bank_ref?: string | null;
+  note?: string | null;
+  paid_at?: string | null;
+  created_at: string;
+}
+
 export default function EarningsPage() {
   const [summary, setSummary] = useState<Summary | null>(null);
   const [trips, setTrips] = useState<TripRow[]>([]);
@@ -44,7 +59,14 @@ export default function EarningsPage() {
   const [loadingTrips, setLoadingTrips] = useState(true);
   const [days, setDays] = useState<7 | 30 | 90>(30);
   const [downloading, setDownloading] = useState(false);
+  const [payouts, setPayouts] = useState<Payout[]>([]);
   const toast = useToast();
+
+  useEffect(() => {
+    api.get<{ payouts: Payout[] }>('/riders/payouts')
+      .then((r) => setPayouts(r.payouts))
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     setLoadingSummary(true);
@@ -158,6 +180,50 @@ export default function EarningsPage() {
             {downloading ? '…' : '⤓ CSV'}
           </button>
         </div>
+
+        {/* Payouts strip — visible whenever there's at least one row */}
+        {payouts.length > 0 && (
+          <div className="card p-0 overflow-hidden">
+            <div className="p-3 text-xs uppercase tracking-wider text-slate-500 font-semibold border-b border-surface-border flex items-center justify-between">
+              <span>Payouts</span>
+              <span className="normal-case text-[10px] font-normal opacity-70">Weekly · every Monday</span>
+            </div>
+            {payouts.slice(0, 6).map((p) => (
+              <div key={p.id} className="p-3 border-b border-surface-border last:border-none">
+                <div className="flex items-baseline justify-between gap-2">
+                  <div className="text-sm">
+                    <span className="font-medium">
+                      {new Date(p.period_start).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+                      {' – '}
+                      {new Date(p.period_end).toLocaleDateString(undefined, { day: 'numeric', month: 'short' })}
+                    </span>
+                    <span className="text-xs text-slate-500 ml-2">{p.trips} trip{p.trips === 1 ? '' : 's'}</span>
+                  </div>
+                  <div className="font-bold">{inr(p.net)}</div>
+                </div>
+                <div className="mt-1 flex items-center justify-between gap-2 text-[11px]">
+                  <span
+                    className={cn(
+                      'chip py-0.5 text-[10px]',
+                      p.status === 'paid'      && 'bg-emerald-50 text-emerald-800 border border-emerald-400',
+                      p.status === 'pending'   && 'bg-amber-50 text-amber-800 border border-amber-400',
+                      p.status === 'failed'    && 'bg-red-50 text-red-800 border border-red-400',
+                      p.status === 'cancelled' && 'bg-slate-100 text-slate-600 border border-slate-300',
+                    )}
+                  >
+                    {p.status === 'paid' ? '✓ Paid' : p.status === 'pending' ? '⏱ Pending' : p.status === 'failed' ? '✕ Failed' : 'Cancelled'}
+                  </span>
+                  <span className="text-slate-500">
+                    Gross {inr(p.gross)} · Comm {inr(p.commission)}
+                  </span>
+                </div>
+                {p.status === 'paid' && p.bank_ref && (
+                  <div className="mt-1 text-[10px] text-slate-500 font-mono">Ref: {p.bank_ref}</div>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Trip ledger */}
         <div className="card p-0 overflow-hidden">
