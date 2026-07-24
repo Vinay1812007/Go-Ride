@@ -1649,7 +1649,113 @@ Schema is in `supabase/migrations/0015_sos_alerts.sql` — apply via
 
 ---
 
-## 37. Phase 3 (not built — deferred to post-MVP)
+## 37. Google Maps Platform (with OSM fallback)
+
+Server-side integration of Google's Places / Geocoding / Routes /
+Route Matrix APIs, wired as the primary provider with the existing
+OSM stack (Nominatim + OSRM) as the automatic fallback.
+
+**Design goal:** the free tier ($200/mo credits from Google Maps
+Platform) covers ordinary pilot traffic. When credits run out — or
+a quota trips, or the request just times out — every call falls
+back to the OSM stack silently, per-call. The app keeps working;
+customers just get slightly less-polished suggestions and haversine-
+derived ETAs.
+
+### What Google covers (when the key is set)
+
+| Function | Google API | Fallback if it fails |
+|---|---|---|
+| `/geo/autocomplete` | Places Autocomplete v1 + Place Details | Nominatim / LocationIQ / Geoapify (per `GEOCODER`) |
+| `/geo/reverse` | Geocoding API (`latlng=`) | Nominatim reverse |
+| `POST /geo/route` | Routes v2 (`computeRoutes`, traffic-aware) | OSRM public demo / ORS / haversine × 25 km/h |
+| Dispatch second-pass ranking | Route Matrix v2 (`computeRouteMatrix`) | Haversine straight-line |
+
+**Rendering** stays on MapLibre + OpenFreeMap tiles for now — the
+customer-visible map looks identical, but every address, ETA, and
+dispatch decision behind it uses Google's data when available.
+
+### One-time setup
+
+1. Google Cloud Console → new project (or existing).
+2. **APIs & Services → Library → enable:**
+   - Places API (New)
+   - Geocoding API
+   - Routes API
+   - (Optional — for Route Matrix dispatch): the Routes API also
+     covers `computeRouteMatrix` under the same API key.
+3. **APIs & Services → Credentials → Create API key.** Restrict to:
+   - **API restrictions:** Places API (New), Geocoding API, Routes API
+   - **Application restrictions:** IP addresses → Cloudflare Workers
+     doesn't expose stable IPs, so leave this as **None** and rely on
+     the API-key restrictions + your own rate limiting via the Worker
+     (the whole point of proxying).
+4. Copy the key.
+5. **GitHub → repo → Settings → Secrets and variables → Actions →**
+   Add `GOOGLE_MAPS_API_KEY`.
+6. Trigger **Deploy web + api** → the workflow pushes the secret to
+   the Worker. That's it — every subsequent request tries Google
+   first, falls back silently on error.
+
+### Cost controls baked in
+
+- **Response caching in KV** — every Google response is cached with
+  a 24-hour TTL (`geo:auto:*`, `geo:rev:*`, `geo:route:*`). Repeat
+  lookups for the same coord pair don't count against quota.
+- **Field masks on every request** — Places / Routes billing is per
+  field group. Every call sends `X-Goog-FieldMask` requesting only
+  what we render (address + coord for autocomplete; distance +
+  duration + polyline for routes). Cuts Autocomplete → Basic Data
+  SKU (~$17/1k) instead of the Advanced tier.
+- **Places Autocomplete session tokens** — Autocomplete + Place
+  Details billed as one *session* instead of per-keystroke.
+- **Route Matrix dispatch pre-filter** — dispatch first trims
+  candidates by haversine to `radiusKm × 1.4`, then re-ranks the
+  survivors with Route Matrix. Prevents blowing quota when 50
+  captains are online in a small area.
+- **Per-call fallback, not per-session** — a transient Google error
+  doesn't kill Google for the whole session; the *next* call tries
+  Google again.
+
+### Monitoring credit spend
+
+- **Google Cloud Console → APIs & Services → Metrics** shows real-
+  time request counts per API per day, and billing shows spend
+  against the $200/mo free credit.
+- **Worker logs** — every fallback prints `warn` with the reason
+  (`google autocomplete failed → OSM fallback: 429 Too Many
+  Requests`). Filter Cloudflare logs for `google.*failed` to see
+  when credits are getting exhausted.
+- Set a **budget alert** in Google Cloud Billing → Budgets & alerts
+  → e.g. alert at 80% of $200/mo. Below that you're free-tier.
+
+### Rolling back
+
+To stop using Google entirely without a code change: **delete the
+`GOOGLE_MAPS_API_KEY` GH secret** and redeploy. The `push` step in
+`deploy.yml` skips empty secrets, so it won't push a blank; and the
+next Worker deploy without the key sees `env.GOOGLE_MAPS_API_KEY`
+undefined → every helper throws before hitting Google, which the
+callers translate into "use OSM".
+
+### Client-side Google Maps rendering (future)
+
+The Maps JavaScript API for actual tile rendering is a separate
+follow-up — would need a new `<GoogleMapView />` component wrapping
+`@googlemaps/react-wrapper`, converting our LngLat markers /
+polylines to Google's. Deferred because MapLibre + OpenFreeMap
+already renders fine and the customer-visible improvement is
+minimal compared to the routing-quality upgrade this integration
+already delivers.
+
+For native APK map rendering (Maps SDK for Android), Capacitor +
+`@capacitor-community/capacitor-googlemaps-native` is the path.
+Also a separate follow-up (needs Google Maps for Android to be
+enabled and a separate Android-restricted API key).
+
+---
+
+## 38. Phase 3 (not built — deferred to post-MVP)
 
 - **Automatic UPI/bank integration** — replace the manual mark-paid
   step with a Razorpay / Cashfree webhook loop. Real-money surface,

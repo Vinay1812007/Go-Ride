@@ -2,6 +2,7 @@
 import type { Env } from './env';
 import { admin, broadcast } from './supabase';
 import { haversineKm } from './geo';
+import { googleRouteMatrix } from './google';
 import { sendToProfile } from './push';
 
 // Bike/scooter customers accept scooter riders and vice-versa. Cabs & autos strict.
@@ -74,8 +75,9 @@ export async function dispatch(
   if (rerr) throw rerr;
   if (!candidates || candidates.length === 0) return 0;
 
-  // Sort by haversine to pickup; keep those within radius.
-  const ranked = candidates
+  // First-pass: haversine filter to trim candidates to a manageable set for
+  // the Matrix API call (Matrix bills per pair).
+  const nearby = candidates
     .map((r) => ({
       ...r,
       d:
@@ -83,9 +85,34 @@ export async function dispatch(
           ? haversineKm(order.pickup_lat, order.pickup_lng, r.last_lat, r.last_lng)
           : Infinity,
     }))
-    .filter((r) => r.d <= radiusKm)
+    .filter((r) => r.d <= radiusKm * 1.4) // widen 40% before the Matrix re-rank
     .sort((a, b) => a.d - b.d)
-    .slice(0, maxRiders);
+    .slice(0, Math.max(maxRiders * 2, 10));
+
+  // Second-pass: if Google is configured, re-rank by real driving distance
+  // via Route Matrix. Falls back silently to the haversine order on any
+  // error — dispatch keeps working even when credits run out.
+  let ranked = nearby;
+  if (env.GOOGLE_MAPS_API_KEY && nearby.length > 1) {
+    try {
+      const matrix = await googleRouteMatrix(
+        env,
+        nearby.filter((r) => r.last_lat != null && r.last_lng != null).map((r) => ({ lat: r.last_lat as number, lng: r.last_lng as number })),
+        [{ lat: order.pickup_lat, lng: order.pickup_lng }],
+      );
+      // Overlay real distance where the Matrix gave us a value.
+      const drivingByIdx = new Map<number, number>();
+      for (const cell of matrix) {
+        if (cell.status === 'ok') drivingByIdx.set(cell.origin, cell.distance_km);
+      }
+      ranked = nearby
+        .map((r, i) => ({ ...r, d: drivingByIdx.get(i) ?? r.d }))
+        .sort((a, b) => a.d - b.d);
+    } catch (e) {
+      console.warn('dispatch: matrix failed → haversine fallback:', (e as Error).message);
+    }
+  }
+  ranked = ranked.filter((r) => r.d <= radiusKm).slice(0, maxRiders);
 
   if (ranked.length === 0) return 0;
 

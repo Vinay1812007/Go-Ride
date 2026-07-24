@@ -100,6 +100,7 @@ jobs:
           GEOCODER_KEY:                  ${{ secrets.GEOCODER_KEY }}
           FIREBASE_PROJECT_ID:           ${{ secrets.FIREBASE_PROJECT_ID }}
           FIREBASE_SERVICE_ACCOUNT_JSON: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_JSON }}
+          GOOGLE_MAPS_API_KEY:           ${{ secrets.GOOGLE_MAPS_API_KEY }}
         run: |
           set -e
           push() {
@@ -119,6 +120,7 @@ jobs:
           push GEOCODER_KEY                  "$GEOCODER_KEY"
           push FIREBASE_PROJECT_ID           "$FIREBASE_PROJECT_ID"
           push FIREBASE_SERVICE_ACCOUNT_JSON "$FIREBASE_SERVICE_ACCOUNT_JSON"
+          push GOOGLE_MAPS_API_KEY           "$GOOGLE_MAPS_API_KEY"
 
       - name: Deploy Worker
         working-directory: apps/api

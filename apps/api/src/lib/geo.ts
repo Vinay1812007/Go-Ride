@@ -1,6 +1,19 @@
 // Provider-switchable geocoding + routing. §9 spec.
+//
+// Provider precedence for each call:
+//   1. Google Maps Platform if GOOGLE_MAPS_API_KEY is set — tried first
+//      because it has the best data quality (traffic-aware routing,
+//      Indian place coverage, business names in autocomplete).
+//   2. On ANY Google error (credits exhausted, quota, network blip,
+//      timeout), we fall back to the configured OSM provider silently.
+//      That means the app keeps working even after the free tier
+//      credits run out — worst case customers just get slightly worse
+//      suggestions and haversine-derived ETAs.
+// The fallback is per-call, not per-session: a transient Google outage
+// on autocomplete doesn't disable Google for the whole session.
 import type { Env } from './env';
 import polyline from '@mapbox/polyline';
+import { googleAutocomplete, googleReverse, googleRoute } from './google';
 
 export interface PlaceSuggestion {
   label: string;
@@ -24,9 +37,27 @@ export async function autocomplete(
 ): Promise<PlaceSuggestion[]> {
   const q = query.trim();
   if (q.length < 3) return [];
-  const cacheKey = `geo:auto:${env.GEOCODER}:${countryCode}:${q.toLowerCase()}`;
+
+  // Provider-independent cache key: results are equivalent enough that
+  // switching providers doesn't need a cache blast. Google's higher-
+  // quality result just wins the first write.
+  const cacheKey = `geo:auto:${countryCode}:${q.toLowerCase()}`;
   const cached = await env.CACHE.get(cacheKey, 'json');
   if (cached) return cached as PlaceSuggestion[];
+
+  // Try Google first when configured. Fall through to the OSM branch on
+  // any error — logged at warn level so admin can spot credit exhaustion.
+  if (env.GOOGLE_MAPS_API_KEY) {
+    try {
+      const g = await googleAutocomplete(env, q, countryCode);
+      if (g.length > 0) {
+        await env.CACHE.put(cacheKey, JSON.stringify(g), { expirationTtl: CACHE_TTL });
+        return g;
+      }
+    } catch (e) {
+      console.warn('google autocomplete failed → OSM fallback:', (e as Error).message);
+    }
+  }
 
   let results: PlaceSuggestion[] = [];
   if (env.GEOCODER === 'nominatim') {
@@ -91,9 +122,22 @@ export async function reverse(
   lat: number,
   lng: number,
 ): Promise<string> {
-  const cacheKey = `geo:rev:${env.GEOCODER}:${lat.toFixed(5)},${lng.toFixed(5)}`;
+  const cacheKey = `geo:rev:${lat.toFixed(5)},${lng.toFixed(5)}`;
   const cached = await env.CACHE.get(cacheKey);
   if (cached) return cached;
+
+  // Google first if configured.
+  if (env.GOOGLE_MAPS_API_KEY) {
+    try {
+      const g = await googleReverse(env, lat, lng);
+      if (g) {
+        await env.CACHE.put(cacheKey, g, { expirationTtl: CACHE_TTL });
+        return g;
+      }
+    } catch (e) {
+      console.warn('google reverse failed → OSM fallback:', (e as Error).message);
+    }
+  }
 
   let label = `${lat.toFixed(5)}, ${lng.toFixed(5)}`;
   try {
@@ -124,9 +168,25 @@ export async function route(
   from: { lat: number; lng: number },
   to: { lat: number; lng: number },
 ): Promise<RouteResult> {
-  const key = `geo:route:${env.ROUTER}:${from.lat.toFixed(5)},${from.lng.toFixed(5)}:${to.lat.toFixed(5)},${to.lng.toFixed(5)}`;
+  // Provider-independent key so a Google route and OSRM route for the same
+  // pair collapse into the same cache entry. Traffic-aware differences
+  // between calls are within our 24h TTL noise floor.
+  const key = `geo:route:${from.lat.toFixed(5)},${from.lng.toFixed(5)}:${to.lat.toFixed(5)},${to.lng.toFixed(5)}`;
   const cached = await env.CACHE.get(key, 'json');
   if (cached) return cached as RouteResult;
+
+  // Google first — better traffic-aware ETAs.
+  if (env.GOOGLE_MAPS_API_KEY) {
+    try {
+      const g = await googleRoute(env, from, to);
+      if (g && isFinite(g.distance_km) && g.distance_km > 0) {
+        await env.CACHE.put(key, JSON.stringify(g), { expirationTtl: CACHE_TTL });
+        return g;
+      }
+    } catch (e) {
+      console.warn('google route failed → OSM fallback:', (e as Error).message);
+    }
+  }
 
   let result: RouteResult;
   if (env.ROUTER === 'ors' && env.ORS_KEY) {

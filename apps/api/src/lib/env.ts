@@ -25,6 +25,11 @@ export interface Env {
   //   as a single string secret.
   FIREBASE_PROJECT_ID?: string;
   FIREBASE_SERVICE_ACCOUNT_JSON?: string;
+  // Google Maps Platform (optional — every helper falls back to the OSM
+  // stack on any error, so credits running out is graceful).
+  // Server-side key: unrestricted, used for Autocomplete / Place Details /
+  //   Geocoding / Reverse / Routes / Route Matrix.
+  GOOGLE_MAPS_API_KEY?: string;
 }
 
 // Hono ContextVariableMap — populated by middleware, read by handlers.
