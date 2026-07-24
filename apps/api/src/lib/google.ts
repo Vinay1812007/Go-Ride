@@ -53,7 +53,7 @@ export async function googleAutocomplete(env: Env, query: string, countryCode = 
     5_000,
     'google autocomplete',
   );
-  if (!res.ok) throw new Error(`google autocomplete ${res.status}`);
+  if (!res.ok) throw new Error(`google autocomplete ${res.status}: ${await res.text().then((t) => t.slice(0, 400)).catch(() => '')}`);
   const data = await res.json() as {
     suggestions?: Array<{ placePrediction?: { text?: { text: string }; placeId: string } }>;
   };
@@ -89,7 +89,7 @@ async function placeDetails(env: Env, placeId: string, sessionToken?: string) {
     5_000,
     'google placeDetails',
   );
-  if (!res.ok) throw new Error(`google placeDetails ${res.status}`);
+  if (!res.ok) throw new Error(`google placeDetails ${res.status}: ${await res.text().then((t) => t.slice(0, 400)).catch(() => '')}`);
   const data = await res.json() as { formattedAddress: string; location: { latitude: number; longitude: number } };
   return { formattedAddress: data.formattedAddress, lat: data.location.latitude, lng: data.location.longitude };
 }
@@ -101,7 +101,7 @@ export async function googleGeocode(env: Env, address: string): Promise<GoogleSu
   url.searchParams.set('address', address);
   url.searchParams.set('key', env.GOOGLE_MAPS_API_KEY);
   const res = await withTimeout(fetch(url), 5_000, 'google geocode');
-  if (!res.ok) throw new Error(`google geocode ${res.status}`);
+  if (!res.ok) throw new Error(`google geocode ${res.status}: ${await res.text().then((t) => t.slice(0, 400)).catch(() => '')}`);
   const data = await res.json() as { status: string; results: Array<{ formatted_address: string; geometry: { location: { lat: number; lng: number } } }> };
   const r = data.results[0];
   if (!r) return null;
@@ -115,7 +115,7 @@ export async function googleReverse(env: Env, lat: number, lng: number): Promise
   url.searchParams.set('latlng', `${lat},${lng}`);
   url.searchParams.set('key', env.GOOGLE_MAPS_API_KEY);
   const res = await withTimeout(fetch(url), 5_000, 'google reverse');
-  if (!res.ok) throw new Error(`google reverse ${res.status}`);
+  if (!res.ok) throw new Error(`google reverse ${res.status}: ${await res.text().then((t) => t.slice(0, 400)).catch(() => '')}`);
   const data = await res.json() as { status: string; results: Array<{ formatted_address: string }> };
   return data.results[0]?.formatted_address ?? null;
 }
@@ -143,7 +143,7 @@ export async function googleRoute(env: Env, from: { lat: number; lng: number }, 
     6_000,
     'google routes',
   );
-  if (!res.ok) throw new Error(`google routes ${res.status}`);
+  if (!res.ok) throw new Error(`google routes ${res.status}: ${await res.text().then((t) => t.slice(0, 400)).catch(() => '')}`);
   const data = await res.json() as { routes?: Array<{ distanceMeters: number; duration: string; polyline: { encodedPolyline: string } }> };
   const r = data.routes?.[0];
   if (!r) throw new Error('google routes: empty');
@@ -179,7 +179,7 @@ export async function googleRouteMatrix(env: Env, origins: Array<{ lat: number; 
     8_000,
     'google matrix',
   );
-  if (!res.ok) throw new Error(`google matrix ${res.status}`);
+  if (!res.ok) throw new Error(`google matrix ${res.status}: ${await res.text().then((t) => t.slice(0, 400)).catch(() => '')}`);
   // The response is application/json but comes as a stream of top-level
   // JSON objects (one per pair) OR a JSON array — normalise.
   const text = await res.text();
