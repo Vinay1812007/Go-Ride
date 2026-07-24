@@ -29,6 +29,7 @@ on:
           - restaurant-partners  # 0011
           - dynamic-surge    # 0012
           - support-tickets  # 0013
+          - saved-places     # 0014
           - seed-only        # seed.sql
 
 jobs:
@@ -74,6 +75,7 @@ jobs:
               run_sql supabase/migrations/0011_restaurant_partners.sql
               run_sql supabase/migrations/0012_dynamic_surge.sql
               run_sql supabase/migrations/0013_support_tickets.sql
+              run_sql supabase/migrations/0014_saved_places.sql
               run_sql supabase/seed.sql
               ;;
             schema-only)     run_sql supabase/migrations/0001_init.sql ;;
@@ -89,6 +91,7 @@ jobs:
             restaurant-partners) run_sql supabase/migrations/0011_restaurant_partners.sql ;;
             dynamic-surge)   run_sql supabase/migrations/0012_dynamic_surge.sql ;;
             support-tickets) run_sql supabase/migrations/0013_support_tickets.sql ;;
+            saved-places)    run_sql supabase/migrations/0014_saved_places.sql ;;
             seed-only)       run_sql supabase/seed.sql ;;
           esac
 

@@ -1522,7 +1522,48 @@ pilot scale (few hundred orders/day) this stays under 50ms.
 
 ---
 
-## 35. Phase 3 (not built — deferred to post-MVP)
+## 35. Saved places
+
+One-tap destination selection for common places — the Home / Work /
+"Gym" shortcut every ride app has.
+
+### Model
+
+- **`saved_places`** — id, profile_id, label, address, lat, lng,
+  place_type enum (`home` | `work` | `other`), timestamps.
+- **Partial unique indexes** enforce at most one Home + one Work per
+  profile. `other` can have many.
+- **RLS:** owner-only (`profile_id = auth.uid()`).
+
+### Customer flow
+
+- **On the HomePage destination sheet** — when the search box is
+  empty, saved places appear as yellow chips ("🏠 Home", "💼 Work",
+  "📍 Gym") + a "Manage →" chip. Tap one to jump straight into
+  `/order/new` with that as the drop, skipping the search.
+- **Empty state** — if the customer has zero saved places, the
+  sheet shows "💡 Save Home + Work for one-tap trip booking" with
+  a link to the manage page.
+- **`/places` management page** — Home + Work cards at the top with
+  Set / Change / × Remove chips, followed by an Others list with
+  add / edit / delete. Editor uses the same `searchPlaces()`
+  autocomplete the destination sheet uses.
+
+### Endpoints
+
+| Endpoint | Notes |
+|---|---|
+| `GET /places` | Own places, home + work first |
+| `POST /places` | Upsert. For home/work, replaces the existing row of that type in the same request — no unique-violation error surfaced |
+| `DELETE /places/:id` | Owner-only |
+
+Schema is in `supabase/migrations/0014_saved_places.sql` — apply via
+**Actions → Apply Supabase migrations → target: saved-places**
+(or `all`).
+
+---
+
+## 36. Phase 3 (not built — deferred to post-MVP)
 
 - **Automatic UPI/bank integration** — replace the manual mark-paid
   step with a Razorpay / Cashfree webhook loop. Real-money surface,

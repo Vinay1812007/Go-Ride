@@ -8,9 +8,14 @@ import type { LatLng, ServiceType } from '@/lib/types';
 import { cn } from '@/lib/cn';
 import CityPicker from '@/components/CityPicker';
 import { detectCityFor, useCity } from '@/hooks/useCity';
+import { useSavedPlaces, type SavedPlace } from '@/hooks/useSavedPlaces';
 
 type Category = 'ride' | 'parcel';
 type CategoryOption = { id: Category; label: string; services: ServiceType[]; icon: string };
+
+function iconFor(kind: SavedPlace['place_type']): string {
+  return kind === 'home' ? '🏠' : kind === 'work' ? '💼' : '📍';
+}
 
 const CATEGORIES: CategoryOption[] = [
   { id: 'ride',   label: 'Ride',   services: ['bike', 'auto', 'cab_4', 'cab_7'],       icon: '🚗' },
@@ -28,6 +33,7 @@ export default function HomePage() {
   const [suggestions, setSuggestions] = useState<Array<{ label: string; lat: number; lng: number }>>([]);
   const [category, setCategory] = useState<Category>('ride');
   const [locError, setLocError] = useState<string | null>(null);
+  const { places } = useSavedPlaces();
 
   // Get GPS on mount, then reverse geocode + auto-detect city.
   useEffect(() => {
@@ -195,6 +201,32 @@ export default function HomePage() {
           placeholder="Search for a place, area, address…"
           className="input"
         />
+
+        {/* Saved places — quick chips when the search box is empty */}
+        {query.trim().length < 3 && places.length > 0 && (
+          <div className="mt-3">
+            <div className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold mb-1">Saved</div>
+            <div className="flex flex-wrap gap-2">
+              {places.slice(0, 8).map((p) => (
+                <button
+                  key={p.id}
+                  onClick={() => chooseDrop({ label: p.address, lat: p.lat, lng: p.lng })}
+                  className="chip bg-brand-50 border border-brand-200 text-brand-800"
+                  title={p.address}
+                >
+                  {iconFor(p.place_type)} {p.label}
+                </button>
+              ))}
+              <Link to="/places" className="chip text-slate-500" onClick={() => setDropSearchOpen(false)}>Manage →</Link>
+            </div>
+          </div>
+        )}
+        {query.trim().length < 3 && places.length === 0 && (
+          <p className="mt-3 text-xs text-slate-400">
+            💡 <Link to="/places" className="underline" onClick={() => setDropSearchOpen(false)}>Save Home + Work</Link> for one-tap trip booking.
+          </p>
+        )}
+
         <ul className="mt-3 divide-y divide-surface-border">
           {suggestions.map((s, i) => (
             <li key={i}>
