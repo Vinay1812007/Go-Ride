@@ -26,6 +26,7 @@ on:
           - push-tokens      # 0008
           - payouts          # 0009
           - service-areas    # 0010
+          - restaurant-partners  # 0011
           - seed-only        # seed.sql
 
 jobs:
@@ -68,6 +69,7 @@ jobs:
               run_sql supabase/migrations/0008_push_tokens.sql
               run_sql supabase/migrations/0009_payouts.sql
               run_sql supabase/migrations/0010_service_area_polygons.sql
+              run_sql supabase/migrations/0011_restaurant_partners.sql
               run_sql supabase/seed.sql
               ;;
             schema-only)     run_sql supabase/migrations/0001_init.sql ;;
@@ -80,6 +82,7 @@ jobs:
             push-tokens)     run_sql supabase/migrations/0008_push_tokens.sql ;;
             payouts)         run_sql supabase/migrations/0009_payouts.sql ;;
             service-areas)   run_sql supabase/migrations/0010_service_area_polygons.sql ;;
+            restaurant-partners) run_sql supabase/migrations/0011_restaurant_partners.sql ;;
             seed-only)       run_sql supabase/seed.sql ;;
           esac
 

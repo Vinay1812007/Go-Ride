@@ -30,7 +30,7 @@ export interface Env {
 // Hono ContextVariableMap — populated by middleware, read by handlers.
 export type Vars = {
   userId?: string;
-  userRole?: 'customer' | 'rider' | 'admin';
+  userRole?: 'customer' | 'rider' | 'admin' | 'restaurant_partner';
   partnerId?: string;
 };
 

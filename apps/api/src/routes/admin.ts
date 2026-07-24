@@ -800,6 +800,62 @@ adminRoute.delete('/restaurants/:id/menu/:itemId', async (c) => {
   return c.json({ ok: true });
 });
 
+// ---- Restaurant partner assignment ----
+// POST /admin/restaurants/:id/partner
+//   { profile_id }  → promote that profile to restaurant_partner + link them
+//   { unassign: true } → demote the currently-linked partner back to customer
+// Uses a small SQL trick: temporarily null the restaurant_id before flipping
+// role (so the CHECK constraint doesn't fire), then set both to the new
+// values in one round-trip.
+adminRoute.post('/restaurants/:id/partner', async (c) => {
+  const rid = c.req.param('id');
+  const body = await c.req.json().catch(() => null) as { profile_id?: string; unassign?: boolean } | null;
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const db = admin(c.env);
+
+  if (body.unassign) {
+    // Find the current partner(s) for this restaurant and demote them.
+    const { data: current } = await db.from('profiles').select('id').eq('restaurant_id', rid).eq('role', 'restaurant_partner');
+    for (const p of current ?? []) {
+      // Null the FK first so the CHECK constraint doesn't fail during role change.
+      await db.from('profiles').update({ restaurant_id: null }).eq('id', p.id);
+      await db.from('profiles').update({ role: 'customer' }).eq('id', p.id);
+    }
+    return c.json({ ok: true, demoted: current?.length ?? 0 });
+  }
+
+  if (!body.profile_id) return c.json({ error: { code: 'missing_profile_id' } }, 400);
+
+  // Confirm the profile exists and isn't already an admin (safety guardrail).
+  const { data: prof } = await db.from('profiles').select('id, role').eq('id', body.profile_id).maybeSingle();
+  if (!prof) return c.json({ error: { code: 'profile_not_found' } }, 404);
+  if (prof.role === 'admin') {
+    return c.json({ error: { code: 'admin_cannot_be_partner', message: "Admins can't also be restaurant partners" } }, 400);
+  }
+
+  // Two-step: role first (must clear existing restaurant_id if any), then FK.
+  // The CHECK requires them to move together. We use an UPDATE with both in
+  // one statement — the constraint is evaluated at statement end, so
+  // simultaneous assignment is legal.
+  const { error } = await db
+    .from('profiles')
+    .update({ role: 'restaurant_partner', restaurant_id: rid })
+    .eq('id', body.profile_id);
+  if (error) return c.json({ error: { code: 'assign_failed', message: error.message } }, 500);
+  return c.json({ ok: true });
+});
+
+// GET /admin/restaurants/:id/partner  → the currently-linked partner (or null)
+adminRoute.get('/restaurants/:id/partner', async (c) => {
+  const { data } = await admin(c.env)
+    .from('profiles')
+    .select('id, full_name, email, phone, created_at')
+    .eq('restaurant_id', c.req.param('id'))
+    .eq('role', 'restaurant_partner')
+    .maybeSingle();
+  return c.json({ partner: data ?? null });
+});
+
 // ---- Cities / service areas ----
 // GET /admin/cities — all cities (active + inactive) with rate-card count
 adminRoute.get('/cities', async (c) => {

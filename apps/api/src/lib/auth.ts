@@ -70,7 +70,7 @@ export const requireAuth: MiddlewareHandler<AppEnv> = async (c, next) => {
 };
 
 // Guard a route by role.
-export function requireRole(...roles: Array<'customer' | 'rider' | 'admin'>): MiddlewareHandler<AppEnv> {
+export function requireRole(...roles: Array<'customer' | 'rider' | 'admin' | 'restaurant_partner'>): MiddlewareHandler<AppEnv> {
   return async (c, next) => {
     const role = c.get('userRole');
     if (!role || !roles.includes(role)) {

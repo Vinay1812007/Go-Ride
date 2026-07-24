@@ -1147,11 +1147,99 @@ render `<CityPicker />` on the HomePage.
 
 ---
 
-## 28. Phase 3 (not built)
+## 28. Restaurant partner portal
+
+Restaurant owners get their own scoped admin so they don't need a
+full-power admin account to manage their menu / see live orders / mark
+themselves open-or-closed.
+
+### Model
+
+- **New `user_role` value: `restaurant_partner`.** Added via `ALTER
+  TYPE user_role ADD VALUE` in migration 0011.
+- **`profiles.restaurant_id`** (nullable FK) — set only when
+  `role = 'restaurant_partner'`. Enforced by a CHECK constraint:
+  `(role = 'restaurant_partner' AND restaurant_id IS NOT NULL) OR
+   (role <> 'restaurant_partner' AND restaurant_id IS NULL)`. So
+  moving a profile in or out of the partner role has to happen with
+  both fields changing at once (statement-end constraint eval).
+- **RLS additions** — partners can read/write their own restaurant +
+  menu items, and read (only) orders where
+  `restaurant_id = their_restaurant_id AND service = 'food'`.
+
+### Admin flow
+
+Admin → **Restaurants** card now has a **Partner →** chip alongside
+Menu / Edit / Active. Opens a modal with:
+
+- The currently-linked partner (if any), with **Remove partner** to
+  demote back to customer.
+- A search box (email / phone / name) using the same
+  `/admin/profiles/search` endpoint the Wallet page uses. Only
+  customers can be promoted — admins and existing partners are
+  disabled with a tooltip.
+- Confirm dialog before assigning, since the promoted user is routed
+  to the partner portal on their next sign-in.
+
+### Partner flow
+
+Partner signs in on the customer app (`goride-web.pages.dev` or the
+`goride-app` APK). The target-router in `App.tsx` recognises
+`role === 'restaurant_partner'` and routes them to `/partner` instead
+of the customer home.
+
+**Three tabs:**
+
+1. **Orders** — live queue with filter chips (Live / Today / All).
+   Each order card shows: order number, order time, items with per-
+   line qty × price, any instructions (in a yellow highlight box),
+   drop address, total, and timestamps for accepted / picked / completed.
+   Auto-refreshes every 15 seconds.
+2. **Menu** — full CRUD (add / edit / hide / hard-delete) with the
+   same veg-indicator + category autocomplete UI the admin uses.
+3. **Info** — narrow editable subset: description, phone, image URL,
+   avg prep min, **Open for orders** toggle. Read-only header block
+   shows the admin-managed fields (name, cuisine, address, city,
+   min order, rating) with a note to contact admin to change them.
+
+### Endpoints
+
+| Endpoint | Notes |
+|---|---|
+| `GET /partner-restaurant/me` | Profile + restaurant + today's orders/revenue + menu-item count |
+| `GET /partner-restaurant/orders?status=` | Their food orders |
+| `GET /partner-restaurant/menu` | Full menu incl. unavailable |
+| `POST /partner-restaurant/menu` | Upsert (path-checked to their restaurant) |
+| `DELETE /partner-restaurant/menu/:itemId` | Hard delete |
+| `PATCH /partner-restaurant/restaurant` | Partner-editable subset only |
+| `GET /admin/restaurants/:id/partner` | Currently-linked partner |
+| `POST /admin/restaurants/:id/partner` | `{profile_id}` promote, `{unassign: true}` demote |
+
+Schema is in `supabase/migrations/0011_restaurant_partners.sql` — apply
+via **Actions → Apply Supabase migrations → target: restaurant-partners**
+(or `all`).
+
+### Testing checklist
+
+1. Apply migration 0011.
+2. Sign up a fresh customer (e.g. `chef@paradise.local`).
+3. Admin → Restaurants → pick Paradise Biryani → **Partner →** → search
+   for that email → **Promote**.
+4. Sign in as that chef on the customer web → auto-routed to `/partner`.
+5. Toggle **Open for orders** off on the Info tab → verify Paradise
+   drops out of the customer /food browse.
+6. Add / edit / hide a menu item → verify it appears / hides on the
+   customer restaurant page immediately.
+7. Book a food order from Paradise on the customer app → verify it
+   appears in the partner's Orders tab within 15 seconds.
+
+---
+
+## 29. Phase 3 (not built)
 
 - Native iOS APK (needs Apple Developer account + APNs cert).
-- Restaurant partner portal (their own admin login).
 - Playwright end-to-end tests for the critical flows.
 - Automatic UPI/bank integration (replace the manual mark-paid step).
+- Restaurant partner analytics (weekly revenue graph, item-level demand).
 
 Say what you want to tackle next.

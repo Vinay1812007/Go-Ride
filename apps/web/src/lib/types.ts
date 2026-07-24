@@ -10,7 +10,7 @@ export type ServiceType =
   | 'parcel_truck'
   | 'food';
 
-export type Role = 'customer' | 'rider' | 'admin';
+export type Role = 'customer' | 'rider' | 'admin' | 'restaurant_partner';
 
 export type OrderStatus =
   | 'scheduled'

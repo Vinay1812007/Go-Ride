@@ -30,6 +30,7 @@ const FoodCheckoutPage = lazy(() => import('./features/customer/FoodCheckoutPage
 const WalletPage       = lazy(() => import('./features/customer/WalletPage'));
 const CaptainShell     = lazy(() => import('./features/rider/CaptainShell'));
 const AdminShell       = lazy(() => import('./features/admin/AdminShell'));
+const RestaurantPartnerShell = lazy(() => import('./features/restaurant-partner/RestaurantPartnerShell'));
 const DevelopersPage   = lazy(() => import('./features/developers/DevelopersPage'));
 
 type Target = 'customer' | 'rider' | 'admin' | undefined;
@@ -122,7 +123,19 @@ export default function App() {
 
   // ------------- Target-locked builds (Pages projects per role) -------------
   if (target === 'customer') {
-    // Customer-only bundle; other roles are blocked with a friendly message.
+    // Customer-only bundle. Restaurant partners share this build (they
+    // sign up as customers, then get promoted by an admin) and get sent
+    // straight to /partner.
+    if (role === 'restaurant_partner') {
+      return (
+        <Suspended>
+          <Routes>
+            <Route path="/partner/*" element={<RestaurantPartnerShell />} />
+            <Route path="*" element={<Navigate to="/partner" replace />} />
+          </Routes>
+        </Suspended>
+      );
+    }
     if (role !== 'customer') return <RoleMismatch target="customer" role={role} email={authEmail} profileMissing={profileError} onSignOut={signOut} />;
     return (
       <Suspended>
@@ -186,6 +199,16 @@ export default function App() {
         <Routes>
           <Route path="/captain/*" element={<CaptainShell />} />
           <Route path="*" element={<Navigate to="/captain" replace />} />
+        </Routes>
+      </Suspended>
+    );
+  }
+  if (role === 'restaurant_partner') {
+    return (
+      <Suspended>
+        <Routes>
+          <Route path="/partner/*" element={<RestaurantPartnerShell />} />
+          <Route path="*" element={<Navigate to="/partner" replace />} />
         </Routes>
       </Suspended>
     );

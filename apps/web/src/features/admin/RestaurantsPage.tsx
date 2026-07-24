@@ -75,6 +75,7 @@ export default function RestaurantsPage() {
   const [menuOpen, setMenuOpen] = useState<Restaurant | null>(null);
   const [saving, setSaving] = useState(false);
   const [filter, setFilter] = useState<'active' | 'all'>('active');
+  const [partnerModal, setPartnerModal] = useState<Restaurant | null>(null);
   const toast = useToast();
 
   async function load() {
@@ -219,6 +220,7 @@ export default function RestaurantsPage() {
               </div>
               <div className="mt-3 flex flex-wrap gap-1.5">
                 <button onClick={() => setMenuOpen(r)} className="chip">Menu →</button>
+                <button onClick={() => setPartnerModal(r)} className="chip">Partner →</button>
                 <button onClick={() => setEditing(r)} className="chip">Edit</button>
                 <button
                   onClick={() => toggleActive(r)}
@@ -253,6 +255,142 @@ export default function RestaurantsPage() {
           onClose={() => { setMenuOpen(null); void load(); /* refresh counts */ }}
         />
       )}
+
+      {/* Partner assignment */}
+      {partnerModal?.id && (
+        <PartnerModal restaurant={partnerModal} onClose={() => setPartnerModal(null)} />
+      )}
+    </div>
+  );
+}
+
+// -------------------------------------------------------------------------
+// Partner assignment modal
+// -------------------------------------------------------------------------
+interface ProfileMatch { id: string; full_name: string; email?: string | null; phone?: string | null; role: string; balance?: number }
+interface PartnerInfo { id: string; full_name: string; email?: string | null; phone?: string | null; created_at: string }
+
+function PartnerModal({ restaurant, onClose }: { restaurant: Restaurant; onClose: () => void }) {
+  const [current, setCurrent] = useState<PartnerInfo | null | undefined>(undefined);
+  const [q, setQ] = useState('');
+  const [results, setResults] = useState<ProfileMatch[]>([]);
+  const [searching, setSearching] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const toast = useToast();
+
+  async function loadCurrent() {
+    try {
+      const res = await api.get<{ partner: PartnerInfo | null }>(`/admin/restaurants/${restaurant.id}/partner`);
+      setCurrent(res.partner);
+    } catch {
+      setCurrent(null);
+    }
+  }
+  useEffect(() => { void loadCurrent(); /* eslint-disable-next-line */ }, [restaurant.id]);
+
+  useEffect(() => {
+    if (q.trim().length < 2) { setResults([]); return; }
+    let cancel = false;
+    const t = setTimeout(async () => {
+      setSearching(true);
+      try {
+        const res = await api.get<{ profiles: ProfileMatch[] }>(`/admin/profiles/search?q=${encodeURIComponent(q.trim())}`);
+        if (!cancel) setResults(res.profiles);
+      } finally { if (!cancel) setSearching(false); }
+    }, 300);
+    return () => { cancel = true; clearTimeout(t); };
+  }, [q]);
+
+  async function assign(p: ProfileMatch) {
+    if (!confirm(`Promote ${p.full_name} to restaurant partner for ${restaurant.name}?\n\nThey'll be routed to the partner portal on their next sign-in.`)) return;
+    setBusy(true);
+    try {
+      await api.post(`/admin/restaurants/${restaurant.id}/partner`, { profile_id: p.id });
+      toast.success('Assigned');
+      await loadCurrent();
+      setQ(''); setResults([]);
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Assign failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function unassign() {
+    if (!confirm(`Remove ${current?.full_name} as partner? They'll be demoted back to customer.`)) return;
+    setBusy(true);
+    try {
+      await api.post(`/admin/restaurants/${restaurant.id}/partner`, { unassign: true });
+      toast.success('Removed');
+      await loadCurrent();
+    } catch (e) {
+      toast.error(e instanceof ApiError ? e.message : 'Unassign failed');
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-40 bg-black/50 flex items-center justify-center p-4" onClick={onClose}>
+      <div className="card bg-white max-w-md w-full max-h-[85vh] overflow-y-auto" onClick={(e) => e.stopPropagation()}>
+        <h2 className="text-lg font-bold mb-1">Restaurant partner</h2>
+        <p className="text-xs text-slate-500 mb-3">{restaurant.name}</p>
+
+        {current === undefined && <div className="text-sm text-slate-500">Loading…</div>}
+
+        {current === null && (
+          <div className="rounded-xl bg-surface-muted p-3 text-sm mb-3">
+            No partner assigned. Search for a customer profile below to promote them.
+          </div>
+        )}
+
+        {current && (
+          <div className="rounded-xl bg-emerald-50 border border-emerald-300 p-3 mb-3">
+            <div className="text-xs uppercase text-emerald-800 mb-1">Currently linked</div>
+            <div className="font-semibold">{current.full_name}</div>
+            <div className="text-xs text-slate-600">{current.email ?? '—'} · {current.phone ?? '—'}</div>
+            <button onClick={unassign} disabled={busy} className="chip text-red-600 mt-2">Remove partner</button>
+          </div>
+        )}
+
+        <label className="block">
+          <span className="text-sm font-medium">Search customers by email / phone / name</span>
+          <input
+            className="input mt-1"
+            placeholder="Min 2 chars"
+            value={q}
+            onChange={(e) => setQ(e.target.value)}
+            autoFocus={current === null}
+          />
+        </label>
+
+        {searching && <div className="text-xs text-slate-500 mt-2">Searching…</div>}
+
+        {results.length > 0 && (
+          <ul className="mt-3 divide-y divide-surface-border max-h-60 overflow-y-auto">
+            {results.map((p) => (
+              <li key={p.id} className="py-2 flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <div className="text-sm font-medium truncate">{p.full_name}</div>
+                  <div className="text-xs text-slate-500 truncate">{p.email ?? '—'} · {p.phone ?? '—'} · {p.role}</div>
+                </div>
+                <button
+                  onClick={() => assign(p)}
+                  disabled={busy || p.role === 'admin' || p.role === 'restaurant_partner'}
+                  className="chip"
+                  title={p.role === 'admin' ? 'Admins cannot be restaurant partners' : p.role === 'restaurant_partner' ? 'Already a partner' : ''}
+                >
+                  Promote
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+
+        <div className="mt-4 flex justify-end">
+          <button onClick={onClose} className="btn-ghost">Close</button>
+        </div>
+      </div>
     </div>
   );
 }
