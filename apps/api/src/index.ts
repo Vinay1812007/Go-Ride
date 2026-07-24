@@ -19,6 +19,8 @@ import restaurantPartner from './routes/restaurantPartner';
 import support from './routes/support';
 import places from './routes/places';
 import sos from './routes/sos';
+import customer from './routes/customer';
+import captains from './routes/captains';
 import { admin as sbAdmin } from './lib/supabase';
 
 const app = new Hono<AppEnv>();
@@ -48,6 +50,8 @@ app.route('/partner-restaurant', restaurantPartner);
 app.route('/support', support);
 app.route('/places', places);
 app.route('/sos', sos);
+app.route('/customer', customer);
+app.route('/captains', captains);
 app.route('/t', tracking);
 
 app.onError((err, c) => {

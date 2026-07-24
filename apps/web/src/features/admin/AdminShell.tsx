@@ -21,6 +21,7 @@ import SurgePage from './SurgePage';
 import SupportPage from './SupportPage';
 import SosPage from './SosPage';
 import GoogleHealthPage from './GoogleHealthPage';
+import AdminSettingsPage from './SettingsPage';
 
 interface Ops {
   kpi: {
@@ -328,6 +329,7 @@ export default function AdminShell() {
     { to: '/admin/reports',     label: 'Reports' },
     { to: '/admin/partners',    label: 'Partners' },
     { to: '/admin/google',      label: 'Google Maps' },
+    { to: '/admin/settings',    label: '⚙️ Settings' },
   ];
   return (
     <div className="h-full flex">
@@ -356,6 +358,7 @@ export default function AdminShell() {
           <Route path="support" element={<SupportPage />} />
           <Route path="sos" element={<SosPage />} />
           <Route path="google" element={<GoogleHealthPage />} />
+          <Route path="settings" element={<AdminSettingsPage />} />
           <Route path="promos" element={<PromosPage />} />
           <Route path="restaurants" element={<RestaurantsPage />} />
           <Route path="wallet" element={<WalletAdminPage />} />

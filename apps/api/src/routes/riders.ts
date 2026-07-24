@@ -399,4 +399,208 @@ riders.get('/offers', requireAuth, requireRole('rider'), async (c) => {
   return c.json({ offers: data ?? [] });
 });
 
+// ─── PROFILE — captain personal info + vehicle change + photo ──────────────
+riders.get('/profile', requireAuth, requireRole('rider'), async (c) => {
+  const uid = c.get('userId')!;
+  const db = admin(c.env);
+  const [{ data: prof }, { data: rider }] = await Promise.all([
+    db.from('profiles').select('id, full_name, phone, email, avatar_url, rating, created_at').eq('id', uid).maybeSingle(),
+    db.from('riders').select('id, status, vehicle_type, vehicle_number, vehicle_model, license_number, city, kyc, kyc_docs, wallet_balance, total_trips').eq('id', uid).maybeSingle(),
+  ]);
+  return c.json({ profile: prof, rider });
+});
+
+riders.patch('/profile', requireAuth, requireRole('rider'), async (c) => {
+  const uid = c.get('userId')!;
+  const body = await c.req.json().catch(() => null) as null | {
+    full_name?: string; phone?: string; avatar_url?: string;
+    vehicle_type?: string; vehicle_number?: string; vehicle_model?: string; license_number?: string; city?: string;
+    kyc_docs?: Record<string, string>;
+  };
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const db = admin(c.env);
+
+  // Split fields between profiles + riders
+  const profileFields: Record<string, unknown> = {};
+  const riderFields:   Record<string, unknown> = {};
+  if (typeof body.full_name  === 'string' && body.full_name.trim())  profileFields.full_name  = body.full_name.trim();
+  if (typeof body.phone      === 'string')                            profileFields.phone      = body.phone;
+  if (typeof body.avatar_url === 'string')                            profileFields.avatar_url = body.avatar_url;
+  if (typeof body.vehicle_type   === 'string')                        riderFields.vehicle_type   = body.vehicle_type;
+  if (typeof body.vehicle_number === 'string')                        riderFields.vehicle_number = body.vehicle_number;
+  if (typeof body.vehicle_model  === 'string')                        riderFields.vehicle_model  = body.vehicle_model;
+  if (typeof body.license_number === 'string')                        riderFields.license_number = body.license_number;
+  if (typeof body.city           === 'string')                        riderFields.city           = body.city;
+  if (body.kyc_docs && typeof body.kyc_docs === 'object')             riderFields.kyc_docs       = body.kyc_docs;
+
+  // Vehicle change resets KYC to pending (admin must re-approve).
+  const vehicleChanged = riderFields.vehicle_type || riderFields.vehicle_number || riderFields.license_number;
+  if (vehicleChanged) riderFields.kyc = 'pending';
+
+  const ops: Promise<unknown>[] = [];
+  if (Object.keys(profileFields).length) ops.push(Promise.resolve(db.from('profiles').update(profileFields).eq('id', uid).then(r => r)));
+  if (Object.keys(riderFields).length)   ops.push(Promise.resolve(db.from('riders').update(riderFields).eq('id', uid).then(r => r)));
+  await Promise.all(ops);
+  return c.json({ ok: true, kyc_reset: !!vehicleChanged });
+});
+
+// ─── WITHDRAWALS — instant payout, 1×/day cap ──────────────────────────────
+// Returns available balance + whether a withdraw was already made today.
+riders.get('/withdraw/status', requireAuth, requireRole('rider'), async (c) => {
+  const uid = c.get('userId')!;
+  const db = admin(c.env);
+  const [{ data: rider }, { data: recent }, { data: allowedRow }] = await Promise.all([
+    db.from('riders').select('wallet_balance').eq('id', uid).maybeSingle(),
+    db.from('withdrawals')
+      .select('id, amount, status, requested_at, paid_at, method, destination')
+      .eq('rider_id', uid)
+      .order('requested_at', { ascending: false })
+      .limit(10),
+    db.from('app_settings').select('value').eq('key', 'withdraw').maybeSingle(),
+  ]);
+  const cfg = (allowedRow?.value ?? { min_paise: 10000, max_per_day: 1, methods: ['upi', 'bank'] }) as {
+    min_paise: number; max_per_day: number; methods: string[];
+  };
+  // Any non-failed withdrawal today counts against the daily cap.
+  const startOfDayIST = new Date();
+  startOfDayIST.setHours(0, 0, 0, 0);
+  // Approximate IST (UTC+05:30) — Cloudflare Workers are UTC.
+  const istOffsetMs = 5.5 * 3600_000;
+  const cutoff = new Date(Math.floor((Date.now() + istOffsetMs) / 86400_000) * 86400_000 - istOffsetMs);
+  const today = (recent ?? []).filter((w) => new Date(w.requested_at) >= cutoff && w.status !== 'failed');
+  return c.json({
+    balance:      Number(rider?.wallet_balance ?? 0),
+    min_amount:   cfg.min_paise / 100,
+    methods:      cfg.methods,
+    used_today:   today.length,
+    max_per_day:  cfg.max_per_day,
+    can_withdraw: today.length < cfg.max_per_day,
+    recent,
+  });
+});
+
+riders.post('/withdraw', requireAuth, requireRole('rider'), async (c) => {
+  const uid = c.get('userId')!;
+  const body = await c.req.json().catch(() => null) as null | {
+    amount?: number; method?: string; destination?: string;
+  };
+  if (!body || typeof body.amount !== 'number' || body.amount <= 0) {
+    return c.json({ error: { code: 'bad_request', message: 'amount is required' } }, 400);
+  }
+  if (!body.destination?.trim()) {
+    return c.json({ error: { code: 'bad_request', message: 'destination is required' } }, 400);
+  }
+  const method = body.method === 'bank' ? 'bank' : 'upi';
+  const db = admin(c.env);
+
+  // Re-check cap + balance server-side (defence in depth).
+  const [{ data: rider }, { data: allowedRow }] = await Promise.all([
+    db.from('riders').select('wallet_balance').eq('id', uid).maybeSingle(),
+    db.from('app_settings').select('value').eq('key', 'withdraw').maybeSingle(),
+  ]);
+  const cfg = (allowedRow?.value ?? { min_paise: 10000, max_per_day: 1 }) as {
+    min_paise: number; max_per_day: number;
+  };
+  const balance = Number(rider?.wallet_balance ?? 0);
+  if (body.amount * 100 < cfg.min_paise) {
+    return c.json({ error: { code: 'below_min', message: `Minimum withdrawal is ₹${cfg.min_paise / 100}` } }, 400);
+  }
+  if (body.amount > balance) {
+    return c.json({ error: { code: 'insufficient', message: 'Not enough balance' } }, 400);
+  }
+
+  const istOffsetMs = 5.5 * 3600_000;
+  const cutoff = new Date(Math.floor((Date.now() + istOffsetMs) / 86400_000) * 86400_000 - istOffsetMs);
+  const { data: todayList } = await db.from('withdrawals')
+    .select('id')
+    .eq('rider_id', uid)
+    .gte('requested_at', cutoff.toISOString())
+    .neq('status', 'failed');
+  if ((todayList ?? []).length >= cfg.max_per_day) {
+    return c.json({ error: { code: 'daily_limit', message: 'Daily withdrawal limit reached — try again tomorrow.' } }, 429);
+  }
+
+  // Record withdrawal + debit wallet in the same transaction-ish burst.
+  // Cloudflare Workers + supabase-js don't support real transactions; we
+  // insert, then debit — if the debit fails we mark the withdrawal failed.
+  const { data: created, error: createErr } = await db.from('withdrawals').insert({
+    rider_id: uid,
+    amount: body.amount,
+    method,
+    destination: body.destination.trim(),
+    status: 'pending',
+  }).select('id').maybeSingle();
+  if (createErr || !created) {
+    return c.json({ error: { code: 'insert_failed', message: createErr?.message ?? 'insert failed' } }, 500);
+  }
+  const { error: debitErr } = await db.from('riders')
+    .update({ wallet_balance: balance - body.amount })
+    .eq('id', uid)
+    .eq('wallet_balance', balance);   // optimistic concurrency
+  if (debitErr) {
+    await db.from('withdrawals').update({ status: 'failed', failure_reason: debitErr.message }).eq('id', created.id);
+    return c.json({ error: { code: 'debit_failed', message: debitErr.message } }, 500);
+  }
+  return c.json({ ok: true, withdrawal_id: created.id, new_balance: balance - body.amount });
+});
+
+// ─── INCENTIVES — quest cards with live progress ───────────────────────────
+riders.get('/incentives', requireAuth, requireRole('rider'), async (c) => {
+  const uid = c.get('userId')!;
+  const db = admin(c.env);
+  const nowIso = new Date().toISOString();
+  const { data: rider } = await db.from('riders').select('vehicle_type, city').eq('id', uid).maybeSingle();
+  const { data: incentives } = await db.from('incentives')
+    .select('id, title, description, kind, target, reward_paise, window_hours, vehicle_type, city, ends_at')
+    .eq('active', true)
+    .lte('starts_at', nowIso)
+    .or(`ends_at.is.null,ends_at.gte.${nowIso}`);
+  // Filter by vehicle/city match (null = matches all).
+  const eligible = (incentives ?? []).filter((i) =>
+    (!i.vehicle_type || i.vehicle_type === rider?.vehicle_type) &&
+    (!i.city         || i.city         === rider?.city));
+
+  // Compute progress from transactions in each incentive's window
+  const results: Array<Record<string, unknown>> = [];
+  for (const inc of eligible) {
+    const since = new Date(Date.now() - inc.window_hours * 3600_000).toISOString();
+    const { data: txns } = await db.from('transactions')
+      .select('amount, created_at, orders(pickup_at)')
+      .eq('rider_id', uid)
+      .eq('type', 'trip_earning')
+      .gte('created_at', since);
+    let progress = 0;
+    if (inc.kind === 'trip_count') {
+      progress = (txns ?? []).length;
+    } else if (inc.kind === 'earnings_target') {
+      progress = Math.floor((txns ?? []).reduce((s, t) => s + Number(t.amount), 0));
+    } else if (inc.kind === 'peak_hours') {
+      // Trips between 17:00–22:00 IST count
+      progress = (txns ?? []).filter((t) => {
+        const d = new Date(t.created_at);
+        const istHour = (d.getUTCHours() + 5) % 24;   // approx
+        return istHour >= 17 && istHour < 22;
+      }).length;
+    } else if (inc.kind === 'streak_days') {
+      const days = new Set((txns ?? []).map((t) => new Date(t.created_at).toISOString().slice(0, 10)));
+      progress = days.size;
+    }
+    const pct = Math.min(100, Math.round((progress / inc.target) * 100));
+    results.push({
+      id: inc.id,
+      title: inc.title,
+      description: inc.description,
+      kind: inc.kind,
+      target: inc.target,
+      progress,
+      pct,
+      reward_rupees: inc.reward_paise / 100,
+      window_hours: inc.window_hours,
+      completed: progress >= inc.target,
+      ends_at: inc.ends_at,
+    });
+  }
+  return c.json({ incentives: results });
+});
+
 export default riders;

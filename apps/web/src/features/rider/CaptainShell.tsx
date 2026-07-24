@@ -13,6 +13,9 @@ import TripPage from './TripPage';
 import OfferCard from './OfferCard';
 import EarningsPage from './EarningsPage';
 import LeaderboardPage from './LeaderboardPage';
+import WithdrawPage from './WithdrawPage';
+import IncentivesPage from './IncentivesPage';
+import CaptainSettingsPage from './CaptainSettingsPage';
 import { useOffers } from './hooks/useOffers';
 import { useRiderGps } from './hooks/useRiderGps';
 import LoadingScreen from '@/components/ui/LoadingScreen';
@@ -175,13 +178,18 @@ function HomePage({ me, refresh }: { me: MeResponse | null; refresh: () => Promi
       {offers.length > 0 && <OfferCard offer={offers[0]!} onDismiss={dismiss} />}
 
       <header className="bg-surface-strong text-white px-4 py-4">
-        <div className="flex items-center justify-between">
-          <div>
-            <div className="text-xs opacity-80">Captain</div>
-            <div className="font-bold">{me?.profile.full_name ?? '…'}</div>
-          </div>
-          <NavLink to="/" className="text-xs opacity-80 underline">
-            Switch to rider
+        <div className="flex items-center justify-between gap-3">
+          <NavLink to="/captain/settings" className="flex items-center gap-3 flex-1 min-w-0 hover:opacity-90 transition">
+            <div className="w-11 h-11 rounded-full bg-brand-500 text-surface-strong flex items-center justify-center font-bold text-lg flex-shrink-0">
+              {(me?.profile.full_name ?? 'C').charAt(0).toUpperCase()}
+            </div>
+            <div className="min-w-0">
+              <div className="text-xs opacity-80">Captain</div>
+              <div className="font-bold truncate">{me?.profile.full_name ?? '…'}</div>
+            </div>
+          </NavLink>
+          <NavLink to="/captain/settings" className="text-white/80 hover:text-white p-2" aria-label="Settings">
+            <svg className="w-6 h-6" viewBox="0 0 20 20" fill="currentColor"><path fillRule="evenodd" d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z" clipRule="evenodd" /></svg>
           </NavLink>
         </div>
       </header>
@@ -275,18 +283,21 @@ function HomePage({ me, refresh }: { me: MeResponse | null; refresh: () => Promi
           </div>
         </NavLink>
 
-        {/* Leaderboard shortcut */}
-        <NavLink
-          to="/captain/leaderboard"
-          className="card flex items-center gap-3 hover:shadow-lg transition bg-gradient-to-r from-brand-50 to-white"
-        >
-          <div className="text-2xl">🏆</div>
-          <div className="flex-1">
-            <div className="text-sm font-semibold">This week's leaderboard</div>
-            <div className="text-xs text-slate-500">See how you rank against other captains</div>
-          </div>
-          <span className="text-brand-800 font-bold">→</span>
-        </NavLink>
+        {/* Quick actions */}
+        <div className="grid grid-cols-3 gap-2">
+          <NavLink to="/captain/withdraw" className="card flex flex-col items-center py-3 hover:shadow-lg transition">
+            <div className="text-2xl mb-1">💰</div>
+            <div className="text-xs font-semibold">Withdraw</div>
+          </NavLink>
+          <NavLink to="/captain/incentives" className="card flex flex-col items-center py-3 hover:shadow-lg transition bg-gradient-to-b from-brand-50 to-white">
+            <div className="text-2xl mb-1">🎯</div>
+            <div className="text-xs font-semibold">Incentives</div>
+          </NavLink>
+          <NavLink to="/captain/leaderboard" className="card flex flex-col items-center py-3 hover:shadow-lg transition">
+            <div className="text-2xl mb-1">🏆</div>
+            <div className="text-xs font-semibold">Leaderboard</div>
+          </NavLink>
+        </div>
 
         <p className="text-center text-xs text-slate-400 pt-2">
           Pull to refresh. Offers arrive automatically while online.
@@ -318,6 +329,9 @@ export default function CaptainShell() {
       <Route path="trip/:orderId" element={<TripPageWithGps />} />
       <Route path="earnings" element={<EarningsPage />} />
       <Route path="leaderboard" element={<LeaderboardPage />} />
+      <Route path="withdraw" element={<WithdrawPage />} />
+      <Route path="incentives" element={<IncentivesPage />} />
+      <Route path="settings" element={<CaptainSettingsPage />} />
       <Route path="*" element={<Navigate to="/captain" replace />} />
     </Routes>
   );

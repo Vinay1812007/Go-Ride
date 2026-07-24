@@ -9,6 +9,7 @@ import { cn } from '@/lib/cn';
 import CityPicker from '@/components/CityPicker';
 import { detectCityFor, useCity } from '@/hooks/useCity';
 import { useSavedPlaces, type SavedPlace } from '@/hooks/useSavedPlaces';
+import { api } from '@/lib/api';
 
 type Category = 'ride' | 'parcel';
 type CategoryOption = { id: Category; label: string; services: ServiceType[]; icon: string };
@@ -33,7 +34,25 @@ export default function HomePage() {
   const [suggestions, setSuggestions] = useState<Array<{ label: string; lat: number; lng: number }>>([]);
   const [category, setCategory] = useState<Category>('ride');
   const [locError, setLocError] = useState<string | null>(null);
+  const [nearby, setNearby] = useState<Array<{ lat: number; lng: number; vehicle_type?: string }>>([]);
   const { places } = useSavedPlaces();
+
+  // Poll nearby captains for the "cars in your area" map decoration.
+  useEffect(() => {
+    if (!pickup) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const r = await api.get<{ captains: typeof nearby }>(
+          `/captains/nearby?lat=${pickup.lat}&lng=${pickup.lng}&radius=5`,
+        );
+        if (!cancelled) setNearby(r.captains ?? []);
+      } catch { /* silent — decorative */ }
+    };
+    void load();
+    const t = setInterval(load, 15_000);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [pickup]);
 
   // Get GPS on mount, then reverse geocode + auto-detect city.
   useEffect(() => {
@@ -90,29 +109,32 @@ export default function HomePage() {
     <div className="h-full flex flex-col">
       {/* Top bar */}
       <header className="absolute top-0 inset-x-0 z-20 p-3 flex items-center justify-between gap-2">
-        <div className="flex items-center gap-2 min-w-0">
-          <div className="rounded-xl bg-white shadow-card px-3 py-2 text-sm font-medium truncate">
-            Hi, {profile?.full_name?.split(' ')[0] ?? 'there'}
-          </div>
+        <Link to="/settings" className="flex-shrink-0 rounded-full bg-white shadow-card w-11 h-11 flex items-center justify-center font-bold text-surface-strong hover:brightness-95 transition" aria-label="Settings">
+          {(profile?.full_name ?? '?').charAt(0).toUpperCase()}
+        </Link>
+        <div className="flex-1 flex justify-center">
           <CityPicker />
         </div>
         <div className="flex gap-2">
-          <Link to="/wallet" className="rounded-xl bg-white shadow-card px-3 py-2 text-sm font-medium">
-            💳 Wallet
+          <Link to="/wallet" className="rounded-full bg-white shadow-card w-11 h-11 flex items-center justify-center" aria-label="Wallet">
+            💳
           </Link>
-          <Link to="/history" className="rounded-xl bg-white shadow-card px-3 py-2 text-sm font-medium">
-            History
+          <Link to="/history" className="rounded-full bg-white shadow-card w-11 h-11 flex items-center justify-center" aria-label="History">
+            🕐
           </Link>
-          <button onClick={signOut} className="rounded-xl bg-white shadow-card px-3 py-2 text-sm">
-            Sign out
-          </button>
         </div>
       </header>
 
       {/* Map fills the viewport */}
       <div className="absolute inset-0">
-        <MapView pickup={pickup} />
+        <MapView pickup={pickup} nearby={nearby} />
       </div>
+      {nearby.length > 0 && (
+        <div className="absolute top-16 left-3 z-10 rounded-full bg-white shadow-card px-3 py-1 text-xs font-semibold text-emerald-700">
+          <span className="inline-block w-1.5 h-1.5 rounded-full bg-emerald-500 mr-1.5 animate-pulse" />
+          {nearby.length} captain{nearby.length === 1 ? '' : 's'} nearby
+        </div>
+      )}
 
       {/* Category tabs floating above sheet */}
       <div className="absolute z-10 left-0 right-0 bottom-[45%] flex justify-center pointer-events-none">

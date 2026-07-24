@@ -11,12 +11,21 @@ interface Props {
   center?: LatLng;
   onMapClick?: (p: LatLng) => void;
   className?: string;
+  /** Ghost captain markers to render around pickup (Uber "cars in your area"). */
+  nearby?: Array<{ lat: number; lng: number; vehicle_type?: string }>;
 }
 
-export default function MapView({ pickup, drop, rider, routePolyline, center, onMapClick, className }: Props) {
+// Emoji per vehicle type for the ghost markers.
+const VEHICLE_EMOJI: Record<string, string> = {
+  bike: '🛵', scooter: '🛵', auto: '🛺',
+  cab_4: '🚗', cab_7: '🚙',
+  parcel_bike: '🛵', parcel_auto: '🛺', parcel_truck: '🚚',
+};
+
+export default function MapView({ pickup, drop, rider, routePolyline, center, onMapClick, className, nearby }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const mapRef = useRef<MLMap | null>(null);
-  const markersRef = useRef<{ pickup?: Marker; drop?: Marker; rider?: Marker }>({});
+  const markersRef = useRef<{ pickup?: Marker; drop?: Marker; rider?: Marker; nearby?: Marker[] }>({});
 
   // Init once
   useEffect(() => {
@@ -87,6 +96,28 @@ export default function MapView({ pickup, drop, rider, routePolyline, center, on
       markersRef.current.rider.setRotation(rider.heading);
     }
   }, [rider]);
+
+  // Ghost captain markers (small vehicle emojis around the pickup).
+  // Efficient rebuild — captain positions change every 15s and we keep the
+  // count low (~30), so removing+re-adding is fine.
+  useEffect(() => {
+    const m = mapRef.current;
+    if (!m) return;
+    // Clear existing
+    (markersRef.current.nearby ?? []).forEach((mk) => mk.remove());
+    markersRef.current.nearby = [];
+    if (!nearby || nearby.length === 0) return;
+    for (const c of nearby) {
+      const el = document.createElement('div');
+      el.className = 'h-7 w-7 rounded-full bg-white border border-slate-200 shadow grid place-items-center';
+      el.style.opacity = '0.85';
+      el.innerHTML = `<span style="font-size:14px">${VEHICLE_EMOJI[c.vehicle_type ?? ''] ?? '🚗'}</span>`;
+      const mk = new maplibregl.Marker({ element: el })
+        .setLngLat([c.lng, c.lat])
+        .addTo(m);
+      markersRef.current.nearby.push(mk);
+    }
+  }, [nearby]);
 
   // Fit bounds to include pickup+drop (and route)
   useEffect(() => {

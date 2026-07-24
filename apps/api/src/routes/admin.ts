@@ -1430,4 +1430,132 @@ adminRoute.get('/payouts/:id/transactions', async (c) => {
   return c.json({ items: data ?? [] });
 });
 
+// ─── SETTINGS — org-wide config kv (mounted at /admin/settings) ──────────────
+adminRoute.get('/settings', requireAuth, requireRole('admin'), async (c) => {
+  const { data } = await admin(c.env)
+    .from('app_settings')
+    .select('key, value, updated_at');
+  const out: Record<string, unknown> = {};
+  for (const row of data ?? []) out[row.key] = row.value;
+  return c.json({ settings: out, rows: data ?? [] });
+});
+
+adminRoute.patch('/settings', requireAuth, requireRole('admin'), async (c) => {
+  const body = await c.req.json().catch(() => null) as null | Record<string, unknown>;
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const uid = c.get('userId')!;
+  const rows = Object.entries(body).map(([key, value]) => ({
+    key, value, updated_by: uid, updated_at: new Date().toISOString(),
+  }));
+  const { error } = await admin(c.env).from('app_settings').upsert(rows, { onConflict: 'key' });
+  if (error) return c.json({ error: { code: 'update_failed', message: error.message } }, 500);
+  return c.json({ ok: true, updated: rows.length });
+});
+
+// ─── WITHDRAWALS — all captain withdrawal requests, admin queue ─────────────
+adminRoute.get('/withdrawals', requireAuth, requireRole('admin'), async (c) => {
+  const status = c.req.query('status');   // optional filter
+  const limit = Math.min(200, parseInt(c.req.query('limit') ?? '50', 10));
+  let q = admin(c.env).from('withdrawals')
+    .select('id, rider_id, amount, status, method, destination, reference, failure_reason, requested_at, paid_at, riders(profiles(full_name, phone))')
+    .order('requested_at', { ascending: false })
+    .limit(limit);
+  if (status) q = q.eq('status', status);
+  const { data } = await q;
+  return c.json({ withdrawals: data ?? [] });
+});
+
+adminRoute.post('/withdrawals/:id/mark', requireAuth, requireRole('admin'), async (c) => {
+  const id = c.req.param('id');
+  const body = await c.req.json().catch(() => null) as null | { status: 'processing'|'paid'|'failed'; reference?: string; failure_reason?: string };
+  if (!body?.status) return c.json({ error: { code: 'bad_request' } }, 400);
+  const patch: Record<string, unknown> = { status: body.status };
+  if (body.reference)      patch.reference      = body.reference;
+  if (body.failure_reason) patch.failure_reason = body.failure_reason;
+  if (body.status === 'paid') patch.paid_at = new Date().toISOString();
+  // Refund the wallet if we mark as failed
+  if (body.status === 'failed') {
+    const { data: w } = await admin(c.env).from('withdrawals')
+      .select('rider_id, amount, status')
+      .eq('id', id).maybeSingle();
+    if (w && w.status !== 'failed') {
+      const { data: r } = await admin(c.env).from('riders').select('wallet_balance').eq('id', w.rider_id).maybeSingle();
+      await admin(c.env).from('riders').update({ wallet_balance: Number(r?.wallet_balance ?? 0) + Number(w.amount) }).eq('id', w.rider_id);
+    }
+  }
+  const { error } = await admin(c.env).from('withdrawals').update(patch).eq('id', id);
+  if (error) return c.json({ error: { code: 'update_failed', message: error.message } }, 500);
+  return c.json({ ok: true });
+});
+
+// ─── INCENTIVES CRUD — admin authors quests ────────────────────────────────
+adminRoute.get('/incentives', requireAuth, requireRole('admin'), async (c) => {
+  const { data } = await admin(c.env).from('incentives').select('*').order('created_at', { ascending: false });
+  return c.json({ incentives: data ?? [] });
+});
+
+adminRoute.post('/incentives', requireAuth, requireRole('admin'), async (c) => {
+  const body = await c.req.json().catch(() => null) as null | {
+    title: string; description?: string;
+    kind: 'trip_count'|'earnings_target'|'streak_days'|'peak_hours';
+    target: number; reward_paise: number; window_hours?: number;
+    vehicle_type?: string; city?: string; ends_at?: string;
+  };
+  if (!body?.title || !body?.kind || !body?.target || !body?.reward_paise) {
+    return c.json({ error: { code: 'bad_request' } }, 400);
+  }
+  const { error, data } = await admin(c.env).from('incentives').insert({
+    title: body.title, description: body.description ?? null,
+    kind: body.kind, target: body.target, reward_paise: body.reward_paise,
+    window_hours: body.window_hours ?? 24,
+    vehicle_type: body.vehicle_type ?? null,
+    city: body.city ?? null,
+    ends_at: body.ends_at ?? null,
+    active: true,
+  }).select('id').maybeSingle();
+  if (error) return c.json({ error: { code: 'insert_failed', message: error.message } }, 500);
+  return c.json({ ok: true, id: data?.id });
+});
+
+adminRoute.patch('/incentives/:id', requireAuth, requireRole('admin'), async (c) => {
+  const body = await c.req.json().catch(() => null);
+  if (!body) return c.json({ error: { code: 'bad_request' } }, 400);
+  const { error } = await admin(c.env).from('incentives').update(body).eq('id', c.req.param('id'));
+  if (error) return c.json({ error: { code: 'update_failed', message: error.message } }, 500);
+  return c.json({ ok: true });
+});
+
+adminRoute.delete('/incentives/:id', requireAuth, requireRole('admin'), async (c) => {
+  await admin(c.env).from('incentives').delete().eq('id', c.req.param('id'));
+  return c.json({ ok: true });
+});
+
+// ─── ADMINS ROSTER — who has admin role ────────────────────────────────────
+adminRoute.get('/admins', requireAuth, requireRole('admin'), async (c) => {
+  const { data } = await admin(c.env)
+    .from('profiles')
+    .select('id, full_name, phone, email, created_at')
+    .eq('role', 'admin')
+    .order('created_at', { ascending: false });
+  return c.json({ admins: data ?? [] });
+});
+
+adminRoute.post('/admins/promote', requireAuth, requireRole('admin'), async (c) => {
+  const body = await c.req.json().catch(() => null) as null | { profile_id: string };
+  if (!body?.profile_id) return c.json({ error: { code: 'bad_request' } }, 400);
+  const { error } = await admin(c.env).from('profiles').update({ role: 'admin' }).eq('id', body.profile_id);
+  if (error) return c.json({ error: { code: 'update_failed', message: error.message } }, 500);
+  return c.json({ ok: true });
+});
+
+adminRoute.post('/admins/demote', requireAuth, requireRole('admin'), async (c) => {
+  const body = await c.req.json().catch(() => null) as null | { profile_id: string };
+  if (!body?.profile_id) return c.json({ error: { code: 'bad_request' } }, 400);
+  const uid = c.get('userId')!;
+  if (body.profile_id === uid) return c.json({ error: { code: 'self_demote' } }, 400);
+  const { error } = await admin(c.env).from('profiles').update({ role: 'customer' }).eq('id', body.profile_id);
+  if (error) return c.json({ error: { code: 'update_failed', message: error.message } }, 500);
+  return c.json({ ok: true });
+});
+
 export default adminRoute;
