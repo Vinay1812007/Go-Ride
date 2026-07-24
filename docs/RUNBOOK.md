@@ -1335,7 +1335,75 @@ nightly materialised view refreshed by a cron.
 
 ---
 
-## 32. Phase 3 (not built — deferred to post-MVP)
+## 32. Dynamic surge pricing
+
+Auto-adjusts each rate card's `surge_multiplier` every 2 minutes based
+on live demand/supply per (city, service). Opt-in per rate card so admin
+keeps full control.
+
+### Model
+
+- **`rate_cards.auto_surge`** (bool, default false) — off means the
+  card uses whatever multiplier admin set manually.
+- **`rate_cards.surge_multiplier_floor` / `_cap`** (default 1.0 / 2.5) —
+  clamp for auto mode. Protects customers from unbounded surge.
+- **`surge_history`** table — one row per (city, service) per 2 min
+  when auto-surge is on. 7-day retention, trimmed by the run function.
+- **`run_surge()`** Postgres function does the compute:
+  - demand = orders in `searching` / `no_rider_found` for that
+    (city, service) in the last 5 min
+  - supply = online + KYC-approved riders with matching vehicle type
+    in the same city (bike ↔ scooter, parcel_bike ↔ parcel_scooter)
+  - `raw = 1 + (demand / (supply+1)) × 0.30` — one waiting order
+    bumps ~30% when supply is zero
+  - `multiplier = clamp(raw, floor, cap)`, rounded to 2 dp
+- Cron `*/2 * * * *` triggers `run_surge()`.
+
+The fare engine already respected `surge_multiplier` — no changes
+downstream.
+
+### Admin flow
+
+- **Rate cards page** — each card row shows the current multiplier
+  chip; when auto-surge is on, the manual +/− stepper is disabled and
+  the chip carries an "AUTO · 1.0–2.5×" caption underneath.
+- **Rate card editor modal** — new section: **Dynamic surge** checkbox
+  + floor + cap fields (only shown when the checkbox is on).
+- **New Surge page** (`/admin/surge`, in the sidebar between Rate
+  cards and Promos) — live dashboard grouped into "Auto-surge" (with
+  per-card expandable 24-hour mini bar chart) and "Static" (compact
+  grid). Auto-refreshes every 15s to show cron effect. **Run now**
+  button triggers `run_surge()` on demand.
+- **Colour code:** ≥1.5× red, >1.0× amber, ≤1.0× green.
+
+### Endpoints
+
+| Endpoint | Notes |
+|---|---|
+| `GET /admin/surge/current` | Rate cards + latest history sample per (city, service) |
+| `GET /admin/surge/history?city=&service=&hours=24` | Timeline for the mini chart |
+| `POST /admin/surge/run` | Manual recompute |
+
+### First-time setup
+
+1. Apply migration 0012 (`Actions → Apply Supabase migrations → target:
+   dynamic-surge` or `all`).
+2. Redeploy the Worker so the new every-2-min cron registers.
+3. On the Rate cards page, edit a card and tick **Dynamic surge**.
+   First sample lands with the next cron.
+
+### Tuning
+
+Two knobs in the SQL function:
+- **Sensitivity** — `× 0.30` in `v_raw`. Higher = surge climbs faster.
+- **Demand window** — `interval '5 minutes'`. Longer = smoother
+  average, slower to react.
+
+Edit the migration file, re-apply.
+
+---
+
+## 33. Phase 3 (not built — deferred to post-MVP)
 
 - **Automatic UPI/bank integration** — replace the manual mark-paid
   step with a Razorpay / Cashfree webhook loop. Real-money surface,
@@ -1343,9 +1411,6 @@ nightly materialised view refreshed by a cron.
 - **Native iOS APK** — needs Apple Developer account + APNs cert.
 - More e2e coverage (full customer → captain trip flow) — needs a
   test data seeder that resets between runs.
-- **Dynamic surge pricing** — schema already has `surge_multiplier`
-  on rate_cards; needs a rules engine or cron that adjusts based on
-  demand/supply gap per city.
 - **Chat with support agents** — new admin-support role + queue
   routing + inbox UI.
 

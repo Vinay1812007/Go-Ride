@@ -22,6 +22,9 @@ interface RateCard {
   commission_pct: number;
   parcel_weight_limit_kg?: number | null;
   active: boolean;
+  auto_surge: boolean;
+  surge_multiplier_floor: number;
+  surge_multiplier_cap: number;
 }
 
 const ALL_SERVICES: ServiceType[] = [
@@ -42,6 +45,9 @@ const DEFAULT_CARD: RateCard = {
   commission_pct: 15,
   parcel_weight_limit_kg: null,
   active: true,
+  auto_surge: false,
+  surge_multiplier_floor: 1,
+  surge_multiplier_cap: 2.5,
 };
 
 export default function RateCardsPage() {
@@ -203,7 +209,7 @@ export default function RateCardsPage() {
                         <div className="inline-flex items-center gap-1 bg-surface-muted rounded-full">
                           <button
                             onClick={() => bumpSurge(c, -0.1)}
-                            disabled={busyId === `${busyKey}:surge` || c.surge_multiplier <= 0.5}
+                            disabled={busyId === `${busyKey}:surge` || c.surge_multiplier <= 0.5 || c.auto_surge}
                             className="h-7 w-7 rounded-full hover:bg-slate-200 disabled:opacity-30"
                             aria-label="Decrease surge"
                           >−</button>
@@ -212,11 +218,14 @@ export default function RateCardsPage() {
                           </span>
                           <button
                             onClick={() => bumpSurge(c, 0.1)}
-                            disabled={busyId === `${busyKey}:surge` || c.surge_multiplier >= 5}
+                            disabled={busyId === `${busyKey}:surge` || c.surge_multiplier >= 5 || c.auto_surge}
                             className="h-7 w-7 rounded-full hover:bg-slate-200 disabled:opacity-30"
                             aria-label="Increase surge"
                           >+</button>
                         </div>
+                        {c.auto_surge && (
+                          <div className="text-[10px] text-brand-800 font-semibold mt-1">AUTO · {c.surge_multiplier_floor.toFixed(1)}–{c.surge_multiplier_cap.toFixed(1)}×</div>
+                        )}
                       </td>
                       <td className="p-3 text-right">{c.commission_pct}%</td>
                       <td className="p-3 text-center">
@@ -292,6 +301,8 @@ function EditModal({
         surge_multiplier: Number(form.surge_multiplier),
         commission_pct: Number(form.commission_pct),
         parcel_weight_limit_kg: form.parcel_weight_limit_kg ? Number(form.parcel_weight_limit_kg) : null,
+        surge_multiplier_floor: Number(form.surge_multiplier_floor),
+        surge_multiplier_cap:   Number(form.surge_multiplier_cap),
       };
       await onSave(clean);
     } finally {
@@ -411,6 +422,39 @@ function EditModal({
                    className="h-4 w-4" />
             <span className="text-sm">Active — accept orders using this card</span>
           </label>
+
+          {/* Dynamic surge section */}
+          <div className="md:col-span-2 border-t border-surface-border pt-3 mt-1">
+            <label className="flex items-start gap-2">
+              <input type="checkbox" checked={form.auto_surge}
+                     onChange={(e) => update('auto_surge', e.target.checked)}
+                     className="h-4 w-4 mt-0.5" />
+              <div>
+                <div className="text-sm font-medium">Dynamic surge</div>
+                <div className="text-[11px] text-slate-500">
+                  Auto-adjust the surge multiplier every 2 minutes based on live demand/supply.
+                  Manual +/− controls disabled when this is on.
+                </div>
+              </div>
+            </label>
+          </div>
+
+          {form.auto_surge && (
+            <>
+              <label className="block">
+                <span className="text-sm font-medium">Surge floor</span>
+                <input type="number" min={0.5} max={5} step={0.1} className="input mt-1" value={form.surge_multiplier_floor}
+                       onChange={(e) => update('surge_multiplier_floor', Number(e.target.value))} />
+                <span className="text-[10px] text-slate-500">Auto-surge never goes below this.</span>
+              </label>
+              <label className="block">
+                <span className="text-sm font-medium">Surge cap</span>
+                <input type="number" min={0.5} max={5} step={0.1} className="input mt-1" value={form.surge_multiplier_cap}
+                       onChange={(e) => update('surge_multiplier_cap', Number(e.target.value))} />
+                <span className="text-[10px] text-slate-500">Cap on how high the multiplier can climb — protects customers.</span>
+              </label>
+            </>
+          )}
         </div>
 
         {/* Live fare preview */}

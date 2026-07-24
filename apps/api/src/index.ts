@@ -59,6 +59,17 @@ export default {
       console.log('pruned', data, 'rider_locations rows');
       return;
     }
+    // Every 2 minutes → dynamic surge recompute for auto_surge=true cards.
+    if (event.cron === '*/2 * * * *') {
+      try {
+        const { data, error } = await sbAdmin(env).rpc('run_surge');
+        if (error) console.warn('surge run failed', error);
+        else if (data) console.log('surge run: updated', data, 'rate_card(s)');
+      } catch (e) {
+        console.warn('surge run threw', e);
+      }
+      return;
+    }
     // Monday 4am UTC → weekly rider payout run.
     // run_payouts() defaults to the previous Mon-Sun window and skips any
     // transactions already covered by an existing payout, so a duplicate

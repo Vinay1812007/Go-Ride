@@ -27,6 +27,7 @@ on:
           - payouts          # 0009
           - service-areas    # 0010
           - restaurant-partners  # 0011
+          - dynamic-surge    # 0012
           - seed-only        # seed.sql
 
 jobs:
@@ -70,6 +71,7 @@ jobs:
               run_sql supabase/migrations/0009_payouts.sql
               run_sql supabase/migrations/0010_service_area_polygons.sql
               run_sql supabase/migrations/0011_restaurant_partners.sql
+              run_sql supabase/migrations/0012_dynamic_surge.sql
               run_sql supabase/seed.sql
               ;;
             schema-only)     run_sql supabase/migrations/0001_init.sql ;;
@@ -83,6 +85,7 @@ jobs:
             payouts)         run_sql supabase/migrations/0009_payouts.sql ;;
             service-areas)   run_sql supabase/migrations/0010_service_area_polygons.sql ;;
             restaurant-partners) run_sql supabase/migrations/0011_restaurant_partners.sql ;;
+            dynamic-surge)   run_sql supabase/migrations/0012_dynamic_surge.sql ;;
             seed-only)       run_sql supabase/seed.sql ;;
           esac
 

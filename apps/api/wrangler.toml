@@ -15,10 +15,11 @@ id = "REPLACE_WITH_KV_ID"
 
 # Schedules:
 #   every minute       — sweep expired offers, widen dispatch, promote scheduled
+#   */2 * * * *        — recompute dynamic surge for rate cards with auto_surge=true
 #   0 3 * * *          — prune rider_locations older than 24h
 #   0 4 * * 1          — Monday 04:00 UTC weekly payout run
 [triggers]
-crons = ["* * * * *", "0 3 * * *", "0 4 * * 1"]
+crons = ["* * * * *", "*/2 * * * *", "0 3 * * *", "0 4 * * 1"]
 
 # Public environment vars (non-secret; put secrets via `wrangler secret put`).
 [vars]

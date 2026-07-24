@@ -146,6 +146,9 @@ export const rateCardBody = z.object({
   parcel_weight_limit_kg: z.number().int().positive().nullable().optional(),
   commission_pct: z.number().min(0).max(50).default(15),
   active: z.boolean().default(true),
+  auto_surge: z.boolean().default(false),
+  surge_multiplier_floor: z.number().min(0.5).max(5).default(1),
+  surge_multiplier_cap:   z.number().min(0.5).max(5).default(2.5),
 });
 
 // Admin: refund/adjustment on completed order

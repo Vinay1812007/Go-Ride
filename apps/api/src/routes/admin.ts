@@ -856,6 +856,60 @@ adminRoute.get('/restaurants/:id/partner', async (c) => {
   return c.json({ partner: data ?? null });
 });
 
+// ---- Dynamic surge ----
+// GET /admin/surge/current — latest snapshot per (city, service) from the
+// history table + current rate_cards state so admin sees both.
+adminRoute.get('/surge/current', async (c) => {
+  const db = admin(c.env);
+  const [{ data: cards }, { data: recent }] = await Promise.all([
+    db.from('rate_cards')
+      .select('id, city, service, surge_multiplier, auto_surge, surge_multiplier_floor, surge_multiplier_cap, active')
+      .eq('active', true)
+      .order('city').order('service'),
+    // Most-recent-per-group is easiest via one recent-window fetch client-side.
+    db.from('surge_history')
+      .select('city, service, multiplier, active_riders, pending_orders, computed_at')
+      .gte('computed_at', new Date(Date.now() - 60 * 60_000).toISOString())
+      .order('computed_at', { ascending: false })
+      .limit(2000),
+  ]);
+  const latest = new Map<string, { multiplier: number; active_riders: number; pending_orders: number; computed_at: string }>();
+  for (const h of recent ?? []) {
+    const key = `${h.city}::${h.service}`;
+    if (!latest.has(key)) latest.set(key, h);
+  }
+  const enriched = (cards ?? []).map((rc) => ({
+    ...rc,
+    latest: latest.get(`${rc.city}::${rc.service}`) ?? null,
+  }));
+  return c.json({ cards: enriched });
+});
+
+// GET /admin/surge/history?city=&service=&hours=24 — timeline for the chart.
+adminRoute.get('/surge/history', async (c) => {
+  const city    = c.req.query('city');
+  const service = c.req.query('service');
+  const hours   = Math.min(168, Math.max(1, parseInt(c.req.query('hours') ?? '24', 10)));
+  if (!city || !service) return c.json({ error: { code: 'bad_request' } }, 400);
+  const since = new Date(Date.now() - hours * 3600_000).toISOString();
+  const { data } = await admin(c.env)
+    .from('surge_history')
+    .select('multiplier, active_riders, pending_orders, computed_at')
+    .eq('city', city)
+    .eq('service', service)
+    .gte('computed_at', since)
+    .order('computed_at', { ascending: true })
+    .limit(5_000);
+  return c.json({ points: data ?? [] });
+});
+
+// POST /admin/surge/run — kick a recompute now instead of waiting for the cron.
+adminRoute.post('/surge/run', async (c) => {
+  const { data, error } = await admin(c.env).rpc('run_surge');
+  if (error) return c.json({ error: { code: 'run_failed', message: error.message } }, 500);
+  return c.json({ updated: Number(data ?? 0) });
+});
+
 // ---- Cities / service areas ----
 // GET /admin/cities — all cities (active + inactive) with rate-card count
 adminRoute.get('/cities', async (c) => {
