@@ -5,6 +5,7 @@ import VehicleSelector, { type VehicleQuote } from '@/components/VehicleSelector
 import BottomSheet from '@/components/ui/BottomSheet';
 import PromoInput from '@/components/PromoInput';
 import { useWalletBalance } from '@/hooks/useWalletBalance';
+import { useCity } from '@/hooks/useCity';
 import { api } from '@/lib/api';
 import type { LatLng, ServiceType, QuoteResult } from '@/lib/types';
 import { inr, scheduleLabel } from '@/lib/format';
@@ -36,6 +37,7 @@ export default function OrderPage() {
   const [promoDiscount, setPromoDiscount] = useState<number>(0);
   const [walletApply, setWalletApply] = useState(false);
   const { balance: walletBalance } = useWalletBalance();
+  const { city } = useCity();
 
   // ── Scheduling ─────────────────────────────────────────────────────────
   // whenMode 'now' skips the picker; 'later' opens it inline. scheduledAt is
@@ -76,7 +78,7 @@ export default function OrderPage() {
             pickup: { lat: s.pickup.lat, lng: s.pickup.lng },
             drop:   { lat: s.drop.lat, lng: s.drop.lng },
             service: svc,
-            city: import.meta.env.VITE_DEFAULT_CITY,
+            city: city,
           }),
         ),
       );
@@ -131,7 +133,7 @@ export default function OrderPage() {
         : undefined;
       const res = await api.post<{ id: string; order_no: string; otp: string; status?: string }>('/orders', {
         service: selected,
-        city: import.meta.env.VITE_DEFAULT_CITY,
+        city: city,
         pickup: { lat: state.pickup.lat, lng: state.pickup.lng, address: state.pickup.address },
         drop:   { lat: state.drop.lat, lng: state.drop.lng, address: state.drop.address },
         payment_method: 'cash',
@@ -232,7 +234,7 @@ export default function OrderPage() {
                 service={selected}
                 pickup={state.pickup}
                 drop={state.drop}
-                city={import.meta.env.VITE_DEFAULT_CITY ?? 'Hyderabad'}
+                city={city}
                 appliedCode={promoCode}
                 appliedDiscount={promoDiscount}
                 onApply={(c, d) => { setPromoCode(c); setPromoDiscount(d); }}

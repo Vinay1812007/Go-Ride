@@ -6,6 +6,8 @@ import { useSession } from '@/lib/session';
 import { getCurrentPosition, reverseGeocode, searchPlaces, DEFAULT_CENTER } from '@/lib/geo';
 import type { LatLng, ServiceType } from '@/lib/types';
 import { cn } from '@/lib/cn';
+import CityPicker from '@/components/CityPicker';
+import { detectCityFor, useCity } from '@/hooks/useCity';
 
 type Category = 'ride' | 'parcel';
 type CategoryOption = { id: Category; label: string; services: ServiceType[]; icon: string };
@@ -18,6 +20,7 @@ const CATEGORIES: CategoryOption[] = [
 export default function HomePage() {
   const nav = useNavigate();
   const { profile, signOut } = useSession();
+  const { city } = useCity();
   const [pickup, setPickup] = useState<LatLng | null>(null);
   const [pickupLabel, setPickupLabel] = useState('Fetching your location…');
   const [dropSearchOpen, setDropSearchOpen] = useState(false);
@@ -26,12 +29,14 @@ export default function HomePage() {
   const [category, setCategory] = useState<Category>('ride');
   const [locError, setLocError] = useState<string | null>(null);
 
-  // Get GPS on mount, then reverse geocode.
+  // Get GPS on mount, then reverse geocode + auto-detect city.
   useEffect(() => {
     let cancelled = false;
     getCurrentPosition().then(async (p) => {
       if (cancelled) return;
       setPickup(p);
+      // Fire-and-forget city detect (respects an explicit user pick).
+      void detectCityFor(p.lat, p.lng);
       try {
         const rev = await reverseGeocode(p.lat, p.lng);
         if (!cancelled) setPickupLabel(rev.label);
@@ -42,9 +47,10 @@ export default function HomePage() {
       if (cancelled) return;
       setLocError('Could not read your location. Search for a pickup instead.');
       setPickup(DEFAULT_CENTER);
-      setPickupLabel(`${import.meta.env.VITE_DEFAULT_CITY} (default)`);
+      setPickupLabel(`${city} (default)`);
     });
     return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   // Debounced search
@@ -77,9 +83,12 @@ export default function HomePage() {
   return (
     <div className="h-full flex flex-col">
       {/* Top bar */}
-      <header className="absolute top-0 inset-x-0 z-20 p-3 flex items-center justify-between">
-        <div className="rounded-xl bg-white shadow-card px-4 py-2 text-sm font-medium">
-          Hi, {profile?.full_name?.split(' ')[0] ?? 'there'}
+      <header className="absolute top-0 inset-x-0 z-20 p-3 flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 min-w-0">
+          <div className="rounded-xl bg-white shadow-card px-3 py-2 text-sm font-medium truncate">
+            Hi, {profile?.full_name?.split(' ')[0] ?? 'there'}
+          </div>
+          <CityPicker />
         </div>
         <div className="flex gap-2">
           <Link to="/wallet" className="rounded-xl bg-white shadow-card px-3 py-2 text-sm font-medium">

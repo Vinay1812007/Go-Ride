@@ -9,10 +9,12 @@ import Spinner from '@/components/ui/Spinner';
 import PromoInput from '@/components/PromoInput';
 import { useWalletBalance } from '@/hooks/useWalletBalance';
 import { useToast } from '@/components/ui/Toast';
+import { useCity } from '@/hooks/useCity';
 
 export default function FoodCheckoutPage() {
   const nav = useNavigate();
   const toast = useToast();
+  const { city } = useCity();
   const [cart, setCart] = useState<CartSnapshot | null>(loadCart());
   const [drop, setDrop] = useState<(LatLng & { address: string }) | null>(null);
   const [locError, setLocError] = useState<string | null>(null);
@@ -47,7 +49,7 @@ export default function FoodCheckoutPage() {
       pickup: { lat: cart.restaurant_lat, lng: cart.restaurant_lng },
       drop:   { lat: drop.lat, lng: drop.lng },
       service: 'food',
-      city: import.meta.env.VITE_DEFAULT_CITY ?? 'Hyderabad',
+      city: city,
     }).then(setFeeQuote).catch(() => setFeeQuote(null));
   }, [cart?.restaurant_id, cart?.lines.length, drop?.lat, drop?.lng]);
   useEffect(() => { saveCart(cart); }, [cart]);
@@ -78,7 +80,7 @@ export default function FoodCheckoutPage() {
     try {
       const res = await api.post<{ id: string; order_no: string }>('/orders', {
         service: 'food',
-        city: import.meta.env.VITE_DEFAULT_CITY ?? 'Hyderabad',
+        city: city,
         restaurant_id: cart.restaurant_id,
         pickup: { lat: cart.restaurant_lat, lng: cart.restaurant_lng, address: `${cart.restaurant_name} · ${cart.restaurant_address}` },
         drop:   { lat: drop.lat, lng: drop.lng, address: drop.address },
@@ -203,7 +205,7 @@ export default function FoodCheckoutPage() {
             service="food"
             pickup={{ lat: cart.restaurant_lat, lng: cart.restaurant_lng }}
             drop={drop ?? { lat: cart.restaurant_lat, lng: cart.restaurant_lng }}
-            city={import.meta.env.VITE_DEFAULT_CITY ?? 'Hyderabad'}
+            city={city}
             foodSubtotal={subtotal}
             appliedCode={promoCode}
             appliedDiscount={promoDiscount}

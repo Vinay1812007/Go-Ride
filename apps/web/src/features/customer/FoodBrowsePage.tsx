@@ -4,6 +4,7 @@ import { api } from '@/lib/api';
 import type { Restaurant } from '@/lib/types';
 import { inr } from '@/lib/format';
 import { cartCount, cartSubtotal, loadCart } from '@/lib/foodCart';
+import { useCity } from '@/hooks/useCity';
 import Skeleton from '@/components/ui/Skeleton';
 import EmptyState from '@/components/ui/EmptyState';
 import { cn } from '@/lib/cn';
@@ -17,7 +18,7 @@ export default function FoodBrowsePage() {
   const [q, setQ] = useState('');
   const [cuisine, setCuisine] = useState<string | null>(null);
 
-  const city = import.meta.env.VITE_DEFAULT_CITY ?? 'Hyderabad';
+  const { city } = useCity();
 
   useEffect(() => {
     setLoading(true);

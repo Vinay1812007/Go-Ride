@@ -4,6 +4,7 @@ import type { AppEnv } from '../lib/env';
 import { requireAuth } from '../lib/auth';
 import { autocomplete, reverse, route as routeGeo } from '../lib/geo';
 import { detectCity } from '../lib/cities';
+import { admin } from '../lib/supabase';
 
 const geo = new Hono<AppEnv>();
 
@@ -27,6 +28,20 @@ geo.post('/route', requireAuth, async (c) => {
   if (!b?.pickup || !b?.drop) return c.json({ error: { code: 'bad_request' } }, 400);
   const r = await routeGeo(c.env, b.pickup, b.drop);
   return c.json(r);
+});
+
+// GET /geo/cities — active cities the customer app can serve. Public + cached
+// hint so the picker dropdown loads instantly.
+geo.get('/cities', async (c) => {
+  const { data } = await admin(c.env)
+    .from('service_areas')
+    .select('city, display_name, country, timezone, center_lat, center_lng, radius_km')
+    .eq('active', true)
+    .order('display_name', { ascending: true });
+  return c.json({ cities: data ?? [] }, 200, {
+    // Cities change rarely — encourage the browser to cache for 10 min.
+    'Cache-Control': 'public, max-age=600',
+  });
 });
 
 // GET /geo/detect-city?lat=&lng= — returns the best-matching active service

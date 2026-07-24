@@ -1105,12 +1105,53 @@ apply via **Actions → Apply Supabase migrations → target: service-areas**
 
 ---
 
-## 27. Phase 3 (not built)
+## 27. Customer city auto-detect + picker
+
+Runtime city selection in the customer app, closing the loop on §26.
+
+- **Auto-detect:** HomePage calls `GET /geo/detect-city?lat=&lng=`
+  after the GPS resolves and stores the best-matching active city.
+- **Explicit override:** the top bar now has a 📍 city chip next to
+  the greeting. Tapping opens a bottom sheet with all active cities
+  (from `GET /geo/cities`) — picking one persists to localStorage and
+  broadcasts to every subscriber immediately.
+- **Precedence:** localStorage > GPS auto-detect > `VITE_DEFAULT_CITY`
+  build-time fallback > `'Hyderabad'`. Explicit user picks always win —
+  once someone taps "Bengaluru", GPS in Hyderabad won't override them.
+- **Downstream:** every customer-side API call that took
+  `VITE_DEFAULT_CITY` now reads from the `useCity()` hook (order create,
+  fare quote, food browse, food checkout, promo validate). So switching
+  cities immediately routes fare, food, and dispatch to the new city's
+  rate cards + restaurants.
+
+### Implementation
+
+- `hooks/useCity.ts` — module-level singleton store with subscribers,
+  no React Context (avoids re-render cascade from a Provider high in
+  the tree). Also exposes `detectCityFor(lat, lng)` for the HomePage's
+  GPS effect to fire-and-forget.
+- `components/CityPicker.tsx` — compact chip button + bottom sheet.
+  Lazily loads `/geo/cities` on first open, then caches.
+- `GET /geo/cities` — public, `Cache-Control: max-age=600` since
+  cities change rarely.
+
+### Multi-city Pages projects
+
+The three per-role Pages projects (customer/captain/admin) still bake
+`VITE_DEFAULT_CITY` at build time — that's now purely the *initial*
+fallback. A single customer bundle can serve any city at runtime.
+
+To pin a Pages project to a specific city hard (e.g., a Bengaluru-only
+brand deployment), leave `VITE_DEFAULT_CITY` as the city slug and don't
+render `<CityPicker />` on the HomePage.
+
+---
+
+## 28. Phase 3 (not built)
 
 - Native iOS APK (needs Apple Developer account + APNs cert).
 - Restaurant partner portal (their own admin login).
 - Playwright end-to-end tests for the critical flows.
 - Automatic UPI/bank integration (replace the manual mark-paid step).
-- Customer app: runtime city auto-detect + city picker.
 
 Say what you want to tackle next.
